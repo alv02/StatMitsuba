@@ -1,2 +1,0 @@
-0.	pair-wise statistical tests
-	symmetric pixel weights, Welch t-test
