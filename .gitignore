@@ -177,4 +177,5 @@ cython_debug/
 
 # ENV
 .tfg
+.venv
 .vscode

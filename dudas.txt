@@ -1,0 +1,18 @@
+Dudas sobre el árticulo:
+1. Se puede implementar sin Pij(Filtro previo), mencionan que te dan la opción, pero si solo tuvieras la funcion de membership
+al ser binaria esta los pesos serían equitativos lo que no tiene sentido.
+2. Normalización de los samples debido a que estan right-skewed, entiendo que es debido a que muchos caminos no aportna nada mientras que otros pocos aportan la mayoria de intensidad, 
+pero esto se aplica tambien en luces puntuales(NEE)?
+3. Box-Cox normaliza la distribucion para que se parezca a la distribucion normal?, Curto 2023 Sirve para tener en cuenta otras estadísticas como los momentos centrales? Que es la
+Normality assumption, que el ground-truth value = media? Ellos usan hasta el momento central 3, se podrían usar más, como?
+4. Si Box-Cox normaliza la distribución por que es necesario tener en cuenta otros momentos centrales como el skewness para correguir la media 
+no se supone que ya esta normalizada la distribución?
+4. No entiendo muy bien por que hay que calcular en el algoritmo 2 los w*, no se podría si tienes las dos distribuciones de ambos estimadores simplemente con un test estadístico ver 
+si son lo suficiente parecidas?
+5. Tengo que mirarme también las aplicaicones para la terminación de RR y el Selective MIS, por que no me lo he mirado mucho.
+6. Parece que en el artículo menciona otras formas para corregir la media teniendo encuenta momentos centrales, pero no tengo acceso al paper de Curto 2023, pagina 5 abajo-izqd.
+
+Dudas de implementación
+1. Implementación del calculo de estadísticas en línea (algoritmo) 1 en el core de mitsuba(c++)?
+2. Implementación del filtro de denoising  (algoritmo 2) como un plugin?
+
