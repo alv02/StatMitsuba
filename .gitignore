@@ -170,10 +170,16 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Mallas triangulos, volumnes
+*.obj
+*.ply
+*.vol
 
 # Images
 *.exr
 *.png
+*.jpeg
+*.jpg
 
 # ENV
 .tfg
