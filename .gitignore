@@ -181,6 +181,7 @@ cython_debug/
 *.jpeg
 *.jpg
 
+.npy
 # ENV
 .tfg
 .venv
