@@ -22,21 +22,45 @@ def calculate_statistics(samples, lam=0.5):
     # Apply Box-Cox transformation to all samples at once (vectorized)
     samples_bc = box_cox(samples, lam)
 
-    # Calculate the mean for each pixel (channels, height, width) using vectorized operations
-    mu = np.sum(samples_bc, axis=3) / samples_bc.shape[3]
-    mu = mu[..., np.newaxis]  # Añadir dimensión si quieres
+    # Calcular la media manualmente
+    mu = np.empty((channels, height, width))
+    for c in range(channels):
+        for i in range(height):
+            for j in range(width):
+                s = 0.0
+                for k in range(spp):
+                    s += samples_bc[c, i, j, k]
+                mu[c, i, j] = s / spp
 
-    # Calculate deviations from the mean (centralization)
-    delta = samples_bc - mu  # Shape will be (channels, height, width, spp)
+    # Calcular M2 (varianza) y M3 (sesgo)
+    M2 = np.empty((channels, height, width))
+    M3 = np.empty((channels, height, width))
+    for c in range(channels):
+        for i in range(height):
+            for j in range(width):
+                s2 = 0.0
+                s3 = 0.0
+                m = mu[c, i, j]
+                for k in range(spp):
+                    delta = samples_bc[c, i, j, k] - m
+                    s2 += delta**2
+                    s3 += delta**3
+                M2[c, i, j] = s2 / spp
+                M3[c, i, j] = s3 / spp
 
-    # Calculate the second central moment (variance) and third central moment (skewness)
-    M2 = np.mean(delta**2, axis=3)  # Variance (second central moment)
-    M3 = np.mean(delta**3, axis=3)  # Skewness (third central moment)
+    # Varianza con corrección de Bessel (n-1)
+    variance = np.empty((channels, height, width))
+    for c in range(channels):
+        for i in range(height):
+            for j in range(width):
+                s = 0.0
+                m = mu[c, i, j]
+                for k in range(spp):
+                    delta = samples_bc[c, i, j, k] - m
+                    s += delta**2
+                variance[c, i, j] = s / (spp - 1)
 
-    # Calculate variance (Bessel-corrected, if needed)
-    variance = np.var(samples_bc, axis=3, ddof=1)
-
-    mu = np.squeeze(mu)
+    # Transponer a (height, width, channels)
     mu = np.transpose(mu, (1, 2, 0))
     variance = np.transpose(variance, (1, 2, 0))
     M2 = np.transpose(M2, (1, 2, 0))
@@ -142,26 +166,24 @@ def apply_weights_to_image(image, weights, radius=5):
 
             weight_window_sub = weight_window[start_i_w:end_i_w, start_j_w:end_j_w]
 
-            weight_window_expanded = np.expand_dims(weight_window_sub, axis=-1)
-
-            # Ahora se puede realizar la multiplicación entre neighborhood y weight_window_expanded
-            weighted_sum = np.sum(neighborhood * weight_window_expanded, axis=(0, 1))
-
-            # Guardamos el resultado en el nuevo píxel
-            result_image[i, j] = weighted_sum
+            for c in range(channels):
+                acc = 0.0
+                for x in range(neighborhood.shape[0]):
+                    for y in range(neighborhood.shape[1]):
+                        acc += neighborhood[x, y, c] * weight_window_sub[x, y]
+                result_image[i, j, c] = acc
 
     return result_image
 
 
 @njit
-def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, radius=5):
+def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5):
     height, width, _ = np.shape(albedo)
     kernels = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
     memebership_funcion = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
 
     epsilon = 1e-8  # Pasar a parametro
     variance = np.where(variance == 0, epsilon, variance)
-    sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
     sigma_inv = np.linalg.inv(sigma)
 
     # Pyxel i
@@ -231,7 +253,7 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, radius=5):
                     )
 
                     t = compute_t_statistic(wij)
-                    mij = np.all(t < gamma_w).astype(int)
+                    mij = int(np.all(t < gamma_w))
                     kernels[i, j, di + radius, dj + radius] *= mij
                     memebership_funcion[i, j, di + radius, dj + radius] = mij
 
@@ -259,7 +281,10 @@ if __name__ == "__main__":
     albedo = np.array(res["albedo"])
     normals = np.array(res["nn"])
 
-    kernels, memberships = denoiser(albedo, normals, spp, mu, variance, M2, M3, gamma_w)
+    sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
+    kernels, memberships = denoiser(
+        albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma
+    )
 
     image = np.array(res["<root>"])
     result = apply_weights_to_image(image, kernels)
