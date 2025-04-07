@@ -1,0 +1,307 @@
+jit_shutdown(): detected 3412 variable leaks:
+ - bool r23[1] = literal(), refs=1
+ - float32 r24[1] = evaluated(), refs=3
+ - float32 r25[1] = evaluated(), refs=3
+ - float32 r26[1] = evaluated(), refs=3
+ - float32 r27[1] = evaluated(), refs=3
+ - float32 r28[1] = evaluated(), refs=3
+ - float32 r29[1] = evaluated(), refs=3
+ - float32 r30[1] = evaluated(), refs=3
+ - float32 r31[1] = evaluated(), refs=3
+ - float32 r32[1] = evaluated(), refs=3
+ - float32 r33[1] = evaluated(), refs=3
+ - float32 r34[1] = evaluated(), refs=3
+ - float32 r35[1] = literal(), refs=16
+ - float32 r36[1] = evaluated(), refs=3
+ - float32 r37[1] = evaluated(), refs=1
+ - float32 r38[1] = evaluated(), refs=3
+ - float32 r39[1] = evaluated(), refs=1
+ - float32 r40[1] = evaluated(), refs=1
+ - float32 r41[1] = evaluated(), refs=1
+ - float32 r42[1] = evaluated(), refs=1
+ - float32 r43[1] = evaluated(), refs=1
+ - float32 r44[1] = evaluated(), refs=3
+ - float32 r45[1] = evaluated(), refs=1
+ - float32 r46[1] = evaluated(), refs=3
+ - float32 r47[1] = evaluated(), refs=1
+ - float32 r48[1] = evaluated(), refs=1
+ - float32 r49[1] = evaluated(), refs=1
+ - float32 r50[1] = evaluated(), refs=1
+ - float32 r51[1] = evaluated(), refs=1
+ - float32 r52[1] = evaluated(), refs=1
+ - float32 r53[1] = evaluated(), refs=1
+ - float32 r54[1] = evaluated(), refs=1
+ - float32 r55[1] = evaluated(), refs=1
+ - float32 r56[1] = evaluated(), refs=1
+ - float32 r57[1] = evaluated(), refs=1
+ - float32 r58[1] = evaluated(), refs=1
+ - float32 r59[1] = evaluated(), refs=1
+ - float32 r60[1] = evaluated(), refs=1
+ - float32 r61[1] = evaluated(), refs=1
+ - float32 r62[1] = evaluated(), refs=1
+ - float32 r63[1] = evaluated(), refs=1
+ - float32 r64[1] = evaluated(), refs=1
+ - float32 r65[1] = evaluated(), refs=1
+ - float32 r66[1] = evaluated(), refs=1
+ - float32 r67[1] = evaluated(), refs=1
+ - float32 r68[1] = evaluated(), refs=1
+ - float32 r69[1] = evaluated(), refs=1
+ - float32 r70[1] = evaluated(), refs=1
+ - float32 r71[1] = evaluated(), refs=1
+ - float32 r72[1] = literal(), refs=52
+ - (skipping remainder)
+jit_registry_shutdown(): leaking 6 instances of type "mitsuba::BSDF".
+jit_registry_shutdown(): leaking 1 instances of type "mitsuba::Emitter".
+jit_registry_shutdown(): leaking 8 instances of type "mitsuba::Shape".
+jit_registry_shutdown(): leaking 1 instances of type "mitsuba::Sensor".
+jit_malloc_shutdown(): leaked
+ - host-async memory: 64.04 MiB in 572 allocations
+nanobind: leaked 10 instances!
+ - leaked instance 0x7fa1e4000d30 of type "mitsuba.Sampler"
+ - leaked instance 0x7fa2147f0068 of type "__main__.StatisticalIntegrator"
+ - leaked instance 0x7fa1d8002600 of type "mitsuba.ProjectiveCamera"
+ - leaked instance 0x7fa2165f4488 of type "mitsuba.Color0f"
+ - leaked instance 0x32a4e910 of type "mitsuba.Scene"
+ - leaked instance 0x7fa1c4004ae0 of type "mitsuba.SamplingIntegrator"
+ - leaked instance 0x7fa2165f5468 of type "mitsuba.ScalarVector2u"
+ - leaked instance 0x7fa2165f43e8 of type "mitsuba.Color0f"
+ - leaked instance 0x7fa227f2be88 of type "drjit.llvm.ad.Bool"
+ - leaked instance 0x7fa1cc002450 of type "mitsuba.Film"
+nanobind: leaked 27 types!
+ - leaked type "drjit.llvm.ad.Float"
+ - leaked type "mitsuba.Film"
+ - leaked type "drjit.llvm.ad.TensorXb"
+ - leaked type "drjit.ArrayBase"
+ - leaked type "mitsuba.RayDifferential3f"
+ - leaked type "mitsuba.Properties"
+ - leaked type "mitsuba.SamplingIntegrator"
+ - leaked type "mitsuba.Object"
+ - leaked type "mitsuba.Integrator"
+ - leaked type "mitsuba.Sampler"
+ - ... skipped remainder
+nanobind: leaked 224 functions!
+ - leaked function ""
+ - leaked function "type"
+ - leaked function ""
+ - leaked function "was_queried"
+ - leaked function "assign"
+ - leaked function "assign"
+ - leaked function "emitters_dr"
+ - leaked function ""
+ - leaked function "ray_intersect"
+ - leaked function ""
+ - leaked function "set_sample_count"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function "eval"
+ - leaked function "__init__"
+ - leaked function "expand"
+ - leaked function "id"
+ - leaked function "named_references"
+ - leaked function ""
+ - leaked function "prepare"
+ - leaked function "__init__"
+ - leaked function "real"
+ - leaked function "get_majorant"
+ - leaked function "bbox"
+ - leaked function "_traverse_1_cb_ro"
+ - leaked function "prepare_sample"
+ - leaked function "sample_position"
+ - leaked function "render"
+ - leaked function "environment"
+ - leaked function "__repr__"
+ - leaked function "property_names"
+ - leaked function "fork"
+ - leaked function "grad"
+ - leaked function "__setitem__"
+ - leaked function "__array__"
+ - leaked function ""
+ - leaked function "wavefront_size"
+ - leaked function "eval"
+ - leaked function "render_backward"
+ - leaked function "__setitem__"
+ - leaked function "get_scattering_coefficients"
+ - leaked function "x"
+ - leaked function "set_shape"
+ - leaked function "create_block"
+ - leaked function "grad"
+ - leaked function ""
+ - leaked function "sample_border"
+ - leaked function "__init__"
+ - leaked function "sensors_dr"
+ - leaked function "traverse"
+ - leaked function "get"
+ - leaked function "phase_function"
+ - leaked function "__init__"
+ - leaked function "get_shape"
+ - leaked function "needs_sample_2"
+ - leaked function "ray_test"
+ - leaked function "pdf_position"
+ - leaked function "render_forward"
+ - leaked function ""
+ - leaked function "base_channels_count"
+ - leaked function "sample_position"
+ - leaked function "__ne__"
+ - leaked function "id"
+ - leaked function "rfilter"
+ - leaked function "near_clip"
+ - leaked function "w"
+ - leaked function "pdf_emitter_direction"
+ - leaked function "__init__"
+ - leaked function "imag"
+ - leaked function "__init__"
+ - leaked function ""
+ - leaked function "get_shape"
+ - leaked function "clear"
+ - leaked function "sample_emitter_ray"
+ - leaked function ""
+ - leaked function "__eq__"
+ - leaked function "__repr__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "eval_direction"
+ - leaked function "crop_size"
+ - leaked function "sensors"
+ - leaked function "w"
+ - leaked function "plugin_name"
+ - leaked function "should_stop"
+ - leaked function "__init__"
+ - leaked function "id"
+ - leaked function "shutter_open"
+ - leaked function ""
+ - leaked function "tf"
+ - leaked function "as_string"
+ - leaked function "imag"
+ - leaked function "sample_ray_differential"
+ - leaked function "sample_direction"
+ - leaked function "pdf_emitter"
+ - leaked function "jax"
+ - leaked function ""
+ - leaked function "pdf_position"
+ - leaked function "y"
+ - leaked function "has_spectral_extinction"
+ - leaked function "size"
+ - leaked function "merge"
+ - leaked function "unqueried"
+ - leaked function "aov_names"
+ - leaked function "develop"
+ - leaked function "ray_intersect_preliminary"
+ - leaked function "x"
+ - leaked function ""
+ - leaked function "set_id"
+ - leaked function "needs_sample_3"
+ - leaked function "clone"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "sample"
+ - leaked function "sample_silhouette"
+ - leaked function "film"
+ - leaked function "shapes_dr"
+ - leaked function "bbox"
+ - leaked function "set_id"
+ - leaked function "shutter_open_time"
+ - leaked function "T"
+ - leaked function ""
+ - leaked function "sample_ray"
+ - leaked function "write"
+ - leaked function "is_homogeneous"
+ - leaked function "mark_queried"
+ - leaked function ""
+ - leaked function "set_samples_per_wavefront"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "world_transform"
+ - leaked function "next_2d"
+ - leaked function ""
+ - leaked function "__delitem__"
+ - leaked function "set_id"
+ - leaked function "invert_silhouette_sample"
+ - leaked function "eval_emitter_direction"
+ - leaked function "string"
+ - leaked function "schedule_state"
+ - leaked function ""
+ - leaked function "advance"
+ - leaked function "seed"
+ - leaked function "eval_direction"
+ - leaked function ""
+ - leaked function "bitmap"
+ - leaked function "sample_wavelengths"
+ - leaked function "sample_wavelengths"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function "__init__"
+ - leaked function "__setitem__"
+ - leaked function ""
+ - leaked function "z"
+ - leaked function ""
+ - leaked function "use_emitter_sampling"
+ - leaked function "flags"
+ - leaked function "__contains__"
+ - leaked function "needs_aperture_sample"
+ - leaked function "array"
+ - leaked function "__repr__"
+ - leaked function ""
+ - leaked function ""
+ - leaked function "__dlpack__"
+ - leaked function ""
+ - leaked function "shapes"
+ - leaked function ""
+ - leaked function "focus_distance"
+ - leaked function "torch"
+ - leaked function "sensor_response_function"
+ - leaked function "sample_emitter"
+ - leaked function ""
+ - leaked function "intersect_aabb"
+ - leaked function "_traverse_1_cb_rw"
+ - leaked function "scale_differential"
+ - leaked function "far_clip"
+ - leaked function "y"
+ - leaked function "z"
+ - leaked function ""
+ - leaked function "schedule_storage"
+ - leaked function ""
+ - leaked function "silhouette_shapes"
+ - leaked function ""
+ - leaked function "real"
+ - leaked function ""
+ - leaked function "class_"
+ - leaked function "set_medium"
+ - leaked function "sample_direction"
+ - leaked function "remove_property"
+ - leaked function "has_property"
+ - leaked function ""
+ - leaked function "__init__"
+ - leaked function "__getitem__"
+ - leaked function "__repr__"
+ - leaked function "crop_offset"
+ - leaked function ""
+ - leaked function "set_scene"
+ - leaked function "cancel"
+ - leaked function "parameters_changed"
+ - leaked function "__dlpack_device__"
+ - leaked function "integrator"
+ - leaked function "__call__"
+ - leaked function "get_medium"
+ - leaked function "sample_ray"
+ - leaked function "pdf_direction"
+ - leaked function "next_1d"
+ - leaked function "__repr__"
+ - leaked function "numpy"
+ - leaked function "shape"
+ - leaked function "shapes_grad_enabled"
+ - leaked function "emitters"
+ - leaked function "sampler"
+ - leaked function "copy_attribute"
+ - leaked function ""
+ - leaked function "sample_count"
+ - leaked function "pdf_direction"
+ - leaked function ""
+ - leaked function "transmittance_eval_pdf"
+ - leaked function "sample_emitter_direction"
+ - leaked function "sample_interaction"
+ - leaked function "put_block"
+ - leaked function "set_plugin_name"
+ - leaked function ""
+ - leaked function ""
+nanobind: this is likely caused by a reference counting issue in the binding code.

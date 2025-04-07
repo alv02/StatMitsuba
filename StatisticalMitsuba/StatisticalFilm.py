@@ -4,13 +4,14 @@ import drjit as dr
 import mitsuba as mi
 from drjit.auto import TensorXf
 from drjit.auto.ad import Bool, Float
+
+mi.set_variant("llvm_ad_rgb")
+
 from StatisticalImageBlock import StatisticalImageBlock
 
 """
 
 """
-
-mi.set_variant("scalar_rgb")
 
 
 class MyFilm(mi.Film):
@@ -35,17 +36,17 @@ class MyFilm(mi.Film):
     def prepare(self, aovs: Sequence[str]) -> int:
         return self.hdrfilm.prepare(aovs)
 
-    # TODO: Devolver StatisticalImageBlock
-    def create_block(self, size, normalize: bool = False, borders: bool = False):
+    def create_block(
+        self, size: mi.ScalarVector2u, normalize: bool = False, borders: bool = False
+    ) -> mi.ImageBlock:
         block = StatisticalImageBlock(
             size=self.size(),
             offset=mi.ScalarPoint2i(self.crop_offset().x, self.crop_offset().y),
             channel_count=self.m_channels_count,
             rfilter=self.rfilter(),
         )
-        print("create_block")
+
         print(block)
-        print(block.channel_count())
         return block
 
     def develop(self, raw: bool = False) -> dr.auto.ad.TensorXf:
@@ -57,13 +58,10 @@ class MyFilm(mi.Film):
         return super().clear()
 
     def put_block(self, block: mi.ImageBlock) -> None:
-        print("put_block")
-        print(block)
-        print(block.channel_count())
         return self.hdrfilm.put_block(block)
 
 
 mi.register_film("myfilm", lambda props: MyFilm(props))
-scene = mi.load_file("../scenes/cbox.xml")
+scene = mi.load_file("../scenes/cbox_film.xml")
 image = mi.render(scene, spp=256)
 mi.util.write_bitmap("my_first_render.exr", image)

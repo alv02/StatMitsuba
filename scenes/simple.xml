@@ -2,8 +2,10 @@
     <default name="spp" value="256"/>
     <default name="res" value="256"/>
 
-    <integrator type='direct'/>
 
+<integrator type="statistical_integrator">
+    <integrator type="path"/>
+</integrator>
     <sensor type="perspective" id="sensor">
         <transform name="to_world">
             <lookat target="0.0, 0.0, 1.25"
@@ -13,7 +15,7 @@
         <sampler type="independent">
             <integer name="sample_count" value="$spp"/>
         </sampler>
-        <film type="myfilm">
+        <film type="hdrfilm">
             <rfilter type="box"/>
             <integer name="width"  value="$res"/>
             <integer name="height" value="$res"/>
