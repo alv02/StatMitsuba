@@ -3,7 +3,7 @@ import os
 import mitsuba as mi
 import numpy as np
 import scipy.stats as stats
-from numba import njit
+from numba import njit, prange
 
 
 @njit
@@ -121,7 +121,7 @@ def compute_t_statistic(w_ij):
     )
 
 
-@njit
+@njit(parallel=True)
 def apply_weights_to_image(image, weights, radius=5):
     """
     Aplica las weights a cada píxel en la imagen usando convolución.
@@ -141,7 +141,7 @@ def apply_weights_to_image(image, weights, radius=5):
     result_image = np.zeros_like(image)
 
     # Iteramos sobre cada píxel de la imagen
-    for i in range(height):
+    for i in prange(height):
         for j in range(width):
             # Extraemos la ventana de pesos para el píxel (i, j)
             weight_window = weights[i, j]
@@ -176,18 +176,22 @@ def apply_weights_to_image(image, weights, radius=5):
     return result_image
 
 
-@njit
+@njit(parallel=True)
 def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5):
-    height, width, _ = np.shape(albedo)
+    height, width, channels = np.shape(albedo)
     kernels = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
     memebership_funcion = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
+    weight_optimals = np.zeros(
+        (height, width, radius * 2 + 1, radius * 2 + 1, channels)
+    )
+    t_statisticals = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1, channels))
 
     epsilon = 1e-8  # Pasar a parametro
     variance = np.where(variance == 0, epsilon, variance)
     sigma_inv = np.linalg.inv(sigma)
 
     # Pyxel i
-    for i in range(height):
+    for i in prange(height):
         for j in range(width):
             prior_i = np.array(
                 [
@@ -256,6 +260,8 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5)
                     mij = int(np.all(t < gamma_w))
                     kernels[i, j, di + radius, dj + radius] *= mij
                     memebership_funcion[i, j, di + radius, dj + radius] = mij
+                    weight_optimals[i, j, di + radius, dj + radius] = wij
+                    t_statisticals[i, j, di + radius, dj + radius] = t
 
             sum_weights = np.sum(kernels[i, j, :, :])
 
@@ -263,14 +269,14 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5)
             if sum_weights != 0:  # Evitar división por cero
                 kernels[i, j, :, :] /= sum_weights
 
-    return kernels, memebership_funcion
+    return kernels, memebership_funcion, weight_optimals, t_statisticals
 
 
 if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
-    samples = np.load("./samples.npy")
+    samples = np.load("./cbox_samples.npy")
     # albedo:ch7-9 normales:ch10-12
-    bitmap = mi.Bitmap("./aovs.exr")
+    bitmap = mi.Bitmap("./cbox.exr")
     res = dict(bitmap.split())
 
     # Test a cada función por separado para comprobar que funcionan correctamente
@@ -281,17 +287,37 @@ if __name__ == "__main__":
     albedo = np.array(res["albedo"])
     normals = np.array(res["nn"])
 
+    radio = 5
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
-    kernels, memberships = denoiser(
-        albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma
+    kernels, memberships, w_optimals, t_statisticals = denoiser(
+        albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=radio
     )
 
     image = np.array(res["<root>"])
-    result = apply_weights_to_image(image, kernels)
+    result = apply_weights_to_image(image, kernels, radius=radio)
 
     bitmap = mi.Bitmap(result)
 
     bitmap.write("denoised_image.exr")
 
-    print(kernels[217, 168])
-    print(memberships[217, 168])
+    np.set_printoptions(
+        precision=4,  # número de decimales
+        suppress=True,  # no usar notación científica
+        linewidth=120,  # ancho máximo de línea
+        threshold=10000,  # cantidad máxima de elementos a mostrar (para no cortar con "...")
+    )
+    print("Kernels: \n", kernels[217, 168])
+    print("Memberships: \n", memberships[217, 168])
+    w_bloque = w_optimals[217, 168]  # forma (11, 11, 3)
+
+    print("W*:")
+    for fila in w_bloque:
+        fila_str = " ".join(f"({r:.2f},{g:.2f},{b:.2f})" for r, g, b in fila)
+        print(fila_str)
+
+    t_bloque = t_statisticals[217, 168]  # forma (11, 11, 3)
+
+    print("t:")
+    for fila in t_bloque:
+        fila_str = " ".join(f"({r:.2f},{g:.2f},{b:.2f})" for r, g, b in fila)
+        print(fila_str)

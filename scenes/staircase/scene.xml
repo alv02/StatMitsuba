@@ -1,15 +1,17 @@
 <scene version="3.0.0">
 	<default name="integrator" value="path" />
-	<default name="spp" value="64" />
+	<default name="spp" value="255" />
 	<default name="resy" value="1280" />
 	<default name="resx" value="720" />
 	<default name="max_depth" value="65" />
-
   <integrator type="statistical_integrator">
-    <integrator type = "$integrator">
-      <integer name="max_depth" value="$max_depth" />
+    <integrator type="aov">
+        <string name="aovs" value="albedo:albedo, nn:geo_normal"/>
+        <integrator type="$integrator" name="my_image">
+          <integer name="max_depth" value="$max_depth" />
+        </integrator>
     </integrator>
-	</integrator>
+  </integrator> 
 	<sensor type="perspective">
 		<float name="fov" value="35" />
 		<transform name="to_world">

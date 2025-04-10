@@ -60,7 +60,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/cbox.xml")
+scene = mi.load_file("../scenes/staircase/scene.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("aovs.exr", sensor.film().bitmap())
+mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
