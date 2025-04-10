@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from denoiser import box_cox
 
 
 def plot_pixel_distribution(x, y, data, data_box_cox):
@@ -65,6 +66,10 @@ def plot_pixel_distribution(x, y, data, data_box_cox):
 
 
 # Cargar datos desde archivos .npy
-data = np.load("samples.npy")
-data_box_cox = np.load("samples_box_cox.npy")
-plot_pixel_distribution(0, 0, data, data_box_cox)
+data = np.load("./staircase_samples.npy")
+data_box_cox_1 = box_cox(data)
+data_box_cox_2 = box_cox(data, 1)
+data_box_cox_3 = box_cox(data, 2)
+plot_pixel_distribution(36, 313, data, data_box_cox_1)
+plot_pixel_distribution(36, 313, data, data_box_cox_2)
+plot_pixel_distribution(36, 313, data, data_box_cox_3)
