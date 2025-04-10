@@ -122,77 +122,35 @@ def compute_t_statistic(w_ij):
 
 
 @njit(parallel=True)
-def apply_weights_to_image(image, weights, radius=5):
-    """
-    Aplica las weights a cada píxel en la imagen usando convolución.
+def denoiser(
+    image,
+    albedo,
+    normals,
+    n,
+    mu,
+    variance,
+    M2,
+    M3,
+    gamma_w,
+    sigma,
+    radius=5,
+    epsilon=1e-8,
+):
+    height, width, channels = np.shape(image)
 
-    Parameters:
-    - image: La imagen original en formato numpy array (altura, ancho, canales)
-    - weights: Matriz de pesos (altura, ancho, ventana, ventana)
+    denoised_image = np.zeros_like(image)
 
-    Returns:
-    - La nueva imagen después de aplicar los pesos.
-    """
-    # Asumiendo que 'image' es una imagen numpy (height, width, channels)
-    height, width, channels = image.shape
-
-    # Los pesos tienen una forma de (height, width, radius * 2 + 1, radius * 2 + 1)
-    # Que corresponde a una vecindad de cada píxel
-    result_image = np.zeros_like(image)
-
-    # Iteramos sobre cada píxel de la imagen
-    for i in prange(height):
-        for j in range(width):
-            # Extraemos la ventana de pesos para el píxel (i, j)
-            weight_window = weights[i, j]
-
-            # Extraemos la vecindad de píxeles correspondientes en la imagen original
-            # En este caso, creamos una ventana centrada en (i, j) con el mismo tamaño que los pesos
-            # Asumimos que la imagen tiene un rango de 3 canales (RGB)
-
-            # Creamos una máscara para los píxeles válidos
-            start_i = max(i - radius, 0)
-            end_i = min(i + radius + 1, height)
-            start_j = max(j - radius, 0)
-            end_j = min(j + radius + 1, width)
-
-            # Definir los límites dentro de la ventana de pesos
-            start_i_w = max(radius - i, 0)
-            end_i_w = start_i_w + (end_i - start_i)
-            start_j_w = max(radius - j, 0)
-            end_j_w = start_j_w + (end_j - start_j)
-            # Extraemos la vecindad de la imagen
-            neighborhood = image[start_i:end_i, start_j:end_j]
-
-            weight_window_sub = weight_window[start_i_w:end_i_w, start_j_w:end_j_w]
-
-            for c in range(channels):
-                acc = 0.0
-                for x in range(neighborhood.shape[0]):
-                    for y in range(neighborhood.shape[1]):
-                        acc += neighborhood[x, y, c] * weight_window_sub[x, y]
-                result_image[i, j, c] = acc
-
-    return result_image
-
-
-@njit(parallel=True)
-def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5):
-    height, width, channels = np.shape(albedo)
-    kernels = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
-    memebership_function = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1))
-    weight_optimals = np.zeros(
-        (height, width, radius * 2 + 1, radius * 2 + 1, channels)
-    )
-    t_statisticals = np.zeros((height, width, radius * 2 + 1, radius * 2 + 1, channels))
-
-    epsilon = 1e-8  # Pasar a parametro
     variance = np.where(variance == 0, epsilon, variance)
     sigma_inv = np.linalg.inv(sigma)
 
     # Pyxel i
     for i in prange(height):
         for j in range(width):
+            kernel = np.zeros((radius * 2 + 1, radius * 2 + 1))
+            memebership_function = np.zeros((radius * 2 + 1, radius * 2 + 1))
+            weight_optimal = np.zeros((radius * 2 + 1, radius * 2 + 1, channels))
+            t_statistical = np.zeros((radius * 2 + 1, radius * 2 + 1, channels))
+
             prior_i = np.array(
                 [
                     j,
@@ -210,13 +168,12 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5)
                 for dj in range(-radius, radius + 1):
                     ni, nj = i + di, j + dj
                     if ni == i and nj == j:
-                        kernels[i, j, di + radius, dj + radius] = 1
-                        memebership_function[i, j, di + radius, dj + radius] = 1
+                        kernel[di + radius, dj + radius] = 1
+                        memebership_function[di + radius, dj + radius] = 1
                         continue
 
                     if not (0 <= ni < height and 0 <= nj < width):
                         continue
-                    # Prior information for the neighboring pixel (i + di, j + dj)
                     prior_j = np.array(
                         [
                             nj,
@@ -230,7 +187,7 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5)
                         ]
                     )
 
-                    kernels[i, j, di + radius, dj + radius] = evaluate_base_filter(
+                    kernel[di + radius, dj + radius] = evaluate_base_filter(
                         prior_i, prior_j, sigma_inv
                     )
 
@@ -258,71 +215,52 @@ def denoiser(albedo, normals, n, mu, variance, M2, M3, gamma_w, sigma, radius=5)
 
                     t = compute_t_statistic(wij)
                     mij = int(np.all(t < gamma_w))
-                    kernels[i, j, di + radius, dj + radius] *= mij
-                    memebership_function[i, j, di + radius, dj + radius] = mij
-                    weight_optimals[i, j, di + radius, dj + radius] = wij
-                    t_statisticals[i, j, di + radius, dj + radius] = t
+                    kernel[di + radius, dj + radius] *= mij
+                    memebership_function[di + radius, dj + radius] = mij
+                    weight_optimal[di + radius, dj + radius] = wij
+                    t_statistical[di + radius, dj + radius] = t
 
-            sum_weights = np.sum(kernels[i, j, :, :])
+            sum_weights = np.sum(kernel[:, :])
 
-            # Normalizamos cada peso de cada píxel j en el vecindario de i
-            if sum_weights != 0:  # Evitar división por cero
-                kernels[i, j, :, :] /= sum_weights
+            if sum_weights != 0:
+                kernel[:, :] /= sum_weights
 
-    return kernels, memebership_function, weight_optimals, t_statisticals
+            # Aplicar el kernel al pixel i
+            weighted_sum = np.zeros(channels)
+            for di in range(-radius, radius + 1):
+                for dj in range(-radius, radius + 1):
+                    ni, nj = i + di, j + dj
+                    if 0 <= ni < height and 0 <= nj < width:
+                        weighted_sum += (
+                            kernel[di + radius, dj + radius] * image[ni, nj, :]
+                        )
+
+            denoised_image[i, j, :] = weighted_sum
+
+    return denoised_image
 
 
 if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
-    samples = np.load("./cbox_samples.npy")
+    samples = np.load("./staircase_samples.npy")
     # albedo:ch7-9 normales:ch10-12
-    bitmap = mi.Bitmap("./cbox.exr")
+    bitmap = mi.Bitmap("./staircase.exr")
     res = dict(bitmap.split())
 
     # Test a cada función por separado para comprobar que funcionan correctamente
     spp, mu, variance, M2, M3 = calculate_statistics(samples)
     gamma_w = calculate_critical_value(spp, spp)
-    print("gamma_w = ", gamma_w)
     res = dict(bitmap.split())
     albedo = np.array(res["albedo"])
     normals = np.array(res["nn"])
+    image = np.array(res["<root>"])
     non_zero_variances = variance[variance > 0]
 
-    radio = 5
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
-    print("before")
-    kernels, memberships, w_optimals, t_statisticals = denoiser(
-        albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=radio
+    result = denoiser(
+        image, albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=20
     )
-
-    print("after")
-    image = np.array(res["<root>"])
-    result = apply_weights_to_image(image, kernels, radius=radio)
 
     bitmap = mi.Bitmap(result)
 
     bitmap.write("denoised_image.exr")
-
-    pixel_x = 84
-    pixel_y = 194
-    np.set_printoptions(
-        precision=4,  # número de decimales
-        suppress=True,  # no usar notación científica
-        linewidth=120,  # ancho máximo de línea
-        threshold=10000,  # cantidad máxima de elementos a mostrar (para no cortar con "...")
-    )
-    print("Kernels: \n", kernels[pixel_y, pixel_x])
-    print("Memberships: \n", memberships[pixel_y, pixel_x])
-    w_bloque = w_optimals[pixel_y, pixel_x]
-
-    print("W*:")
-    for fila in w_bloque:
-        fila_str = " ".join(f"({r:.2f},{g:.2f},{b:.2f})" for r, g, b in fila)
-        print(fila_str)
-
-    t_bloque = t_statisticals[pixel_y, pixel_x]
-
-    print("t:")
-    for fila in t_bloque:
-        fila_str = " ".join(f"({r:.2f},{g:.2f},{b:.2f})" for r, g, b in fila)
-        print(fila_str)
