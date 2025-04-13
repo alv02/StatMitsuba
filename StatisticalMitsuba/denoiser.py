@@ -258,7 +258,7 @@ if __name__ == "__main__":
 
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
     result = denoiser(
-        image, albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=20
+        image, albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=5
     )
 
     bitmap = mi.Bitmap(result)
