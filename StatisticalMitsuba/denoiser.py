@@ -7,69 +7,6 @@ from numba import njit, prange
 
 
 @njit
-def box_cox(samples, lam=0.5):
-    if lam == 0.0:
-        return np.log(samples).astype(np.float32)
-    else:
-        return ((np.power(samples, lam) - 1) / lam).astype(np.float32)
-
-
-@njit
-def calculate_statistics(samples, lam=0.5):
-    """Calculate the mean, variance (M2), and skewness (M3) for each pixel based on MC samples."""
-    channels, height, width, spp = samples.shape
-
-    # Apply Box-Cox transformation to all samples at once (vectorized)
-    samples_bc = box_cox(samples, lam)
-
-    # Calcular la media manualmente
-    mu = np.empty((channels, height, width))
-    for c in range(channels):
-        for i in range(height):
-            for j in range(width):
-                s = 0.0
-                for k in range(spp):
-                    s += samples_bc[c, i, j, k]
-                mu[c, i, j] = s / spp
-
-    # Calcular M2 (varianza) y M3 (sesgo)
-    M2 = np.empty((channels, height, width))
-    M3 = np.empty((channels, height, width))
-    for c in range(channels):
-        for i in range(height):
-            for j in range(width):
-                s2 = 0.0
-                s3 = 0.0
-                m = mu[c, i, j]
-                for k in range(spp):
-                    delta = samples_bc[c, i, j, k] - m
-                    s2 += delta**2
-                    s3 += delta**3
-                M2[c, i, j] = s2 / spp
-                M3[c, i, j] = s3 / spp
-
-    # Varianza con corrección de Bessel (n-1)
-    variance = np.empty((channels, height, width))
-    for c in range(channels):
-        for i in range(height):
-            for j in range(width):
-                s = 0.0
-                m = mu[c, i, j]
-                for k in range(spp):
-                    delta = samples_bc[c, i, j, k] - m
-                    s += delta**2
-                variance[c, i, j] = s / (spp - 1)
-
-    # Transponer a (height, width, channels)
-    mu = np.transpose(mu, (1, 2, 0))
-    variance = np.transpose(variance, (1, 2, 0))
-    M2 = np.transpose(M2, (1, 2, 0))
-    M3 = np.transpose(M3, (1, 2, 0))
-
-    return spp, mu, variance, M2, M3
-
-
-@njit
 def evaluate_base_filter(prior_i, prior_j, sigma_inv):
     # Compute the difference (p_j - p_i)
     diff = prior_j - prior_i
@@ -127,10 +64,8 @@ def denoiser(
     albedo,
     normals,
     n,
-    mu,
-    variance,
-    M2,
-    M3,
+    estimands,
+    estimands_variance,
     gamma_w,
     sigma,
     radius=5,
@@ -140,7 +75,6 @@ def denoiser(
 
     denoised_image = np.zeros_like(image)
 
-    variance = np.where(variance == 0, epsilon, variance)
     sigma_inv = np.linalg.inv(sigma)
 
     # Pyxel i
@@ -191,20 +125,12 @@ def denoiser(
                         prior_i, prior_j, sigma_inv
                     )
 
-                    estimand_i = np.where(
-                        variance[i, j, :] != 0,
-                        mu[i, j, :] + M3[i, j, :] / (6 * variance[i, j, :] * n),
-                        mu[i, j, :],
-                    )
+                    estimand_i = estimands[i, j]
 
-                    estimand_j = np.where(
-                        variance[ni, nj, :] != 0,
-                        mu[ni, nj, :] + M3[ni, nj, :] / (6 * variance[ni, nj, :] * n),
-                        mu[ni, nj, :],
-                    )
+                    estimand_j = estimands[ni, nj]
 
-                    estimand_i_variance = variance[i, j] / n
-                    estimand_j_variance = variance[ni, nj] / n
+                    estimand_i_variance = estimands_variance[i, j]
+                    estimand_j_variance = estimands_variance[ni, nj]
 
                     wij = compute_w(
                         estimand_i,
@@ -242,23 +168,34 @@ def denoiser(
 
 if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
-    samples = np.load("./staircase_samples.npy")
+    statistics = np.load("./stats.npy")
     # albedo:ch7-9 normales:ch10-12
-    bitmap = mi.Bitmap("./staircase.exr")
+    bitmap = mi.Bitmap("./cbox.exr")
     res = dict(bitmap.split())
 
+    estimands = statistics[:, :, :, 0]
+    estimands_variance = statistics[:, :, :, 1]
+    estimands = np.transpose(estimands, (1, 2, 0))
+    estimands_variance = np.transpose(estimands_variance, (1, 2, 0))
+    spp = 32
     # Test a cada función por separado para comprobar que funcionan correctamente
-    spp, mu, variance, M2, M3 = calculate_statistics(samples)
     gamma_w = calculate_critical_value(spp, spp)
     res = dict(bitmap.split())
     albedo = np.array(res["albedo"])
     normals = np.array(res["nn"])
     image = np.array(res["<root>"])
-    non_zero_variances = variance[variance > 0]
 
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
     result = denoiser(
-        image, albedo, normals, spp, mu, variance, M2, M3, gamma_w, sigma, radius=5
+        image,
+        albedo,
+        normals,
+        spp,
+        estimands,
+        estimands_variance,
+        gamma_w,
+        sigma,
+        radius=5,
     )
 
     bitmap = mi.Bitmap(result)

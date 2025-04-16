@@ -31,30 +31,20 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             mu_expanded = mu[..., dr.newaxis]
 
             # Calculate deviations from the mean (centralization)
-            delta = (
-                samples_bc - mu_expanded
-            )  # Now shapes are compatible for broadcasting
+            delta = samples_bc - mu_expanded
 
-            # Rest of your code
             M2 = dr.mean(delta**2, axis=3)
             M3 = dr.mean(delta**3, axis=3)
 
             # Calculate variance (Bessel-corrected)
-            variance = M2 * spp / (spp - 1)  # This applies the Bessel correction
-            variance = dr.maximum(variance, epsilon)
-
+            variance = np.var(samples_bc, axis=3, ddof=1)
+            variance = np.where(variance == 0, epsilon, variance)
             estimands = mu + M3 / (6 * variance * spp)
             estimands_variance = variance / spp
 
-            # Use dr.newaxis for adding dimensions
             estimands_expanded = estimands[..., dr.newaxis]
             estimands_variance_expanded = estimands_variance[..., dr.newaxis]
 
-            # For concatenation, you might need to convert to numpy first if dr.concat isn't available
-            # Option 1: If dr.concat is available
-            # combined_statistics = dr.concat([estimands_expanded, estimands_variance_expanded], axis=3)
-
-            # Option 2: If dr.concat isn't available, detach and use numpy
             estimands_np = dr.detach(estimands_expanded)
             estimands_variance_np = dr.detach(estimands_variance_expanded)
             combined_statistics = np.concatenate(
@@ -64,7 +54,6 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             print(combined_statistics.shape)
             np.save("stats.npy", combined_statistics)
 
-            return combined_statistics
             return combined_statistics
 
     def should_stop(self) -> bool:
@@ -102,4 +91,4 @@ dr.set_flag(dr.JitFlag.Debug, True)
 scene = mi.load_file("../scenes/cbox.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
+mi.util.write_bitmap("cbox.exr", sensor.film().bitmap())

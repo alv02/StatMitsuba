@@ -1,5 +1,5 @@
 #!/usr/bin/python
-# Joint Bilateral Filter in PyTorch
+# Joint Bilateral Filter with Membership Functions in PyTorch (Simplified)
 
 import time
 
@@ -7,6 +7,7 @@ import mitsuba as mi
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy import stats
 from torch import nn
 
 
@@ -32,17 +33,71 @@ class Shift(nn.Module):
         return torch.cat(cat_layers, 1)
 
 
-class JointBilateralFilter(nn.Module):
+def calculate_critical_value(n_i, n_j, alpha=0.005):
+    """Calculate critical value using t-distribution."""
+    # Calculate degrees of freedom
+    degrees_of_freedom = n_i + n_j - 2
+
+    # Calculate critical value from t-distribution
+    gamma_w = stats.t.ppf(1 - alpha / 2, degrees_of_freedom)
+
+    return torch.tensor(gamma_w, dtype=torch.float32)
+
+
+def compute_w(
+    estimand_i, estimand_j, estimand_i_variance, estimand_j_variance, epsilon=1e-8
+):
+    """Compute optimal weight w_ij between pixels i and j."""
+    numerator = (
+        2 * (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
+    )
+    denominator = 2 * (
+        (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
+    )
+
+    # Avoid division by zero
+    denominator = torch.clamp(denominator, min=epsilon)
+
+    # Compute result
+    result = numerator / denominator
+
+    # Handle special case where both numerator and denominator are 0
+
+    result = torch.where(
+        (numerator == 0) & (denominator == 0),
+        torch.full_like(numerator, 0.5),
+        numerator / denominator,
+    )
+
+    return result
+
+
+def compute_t_statistic(w_ij, epsilon=1e-8):
+    """Calculate t-statistic for comparing pixels."""
+    # Handle w_ij = 1 case (return infinity)
+    infinity_mask = w_ij == 1
+
+    # Calculate t-statistic
+    t_stat = torch.sqrt((1 / (2 * (1 - w_ij + epsilon))) - 1)
+
+    # Set infinity values
+    t_stat = torch.where(infinity_mask, torch.tensor(float("inf")), t_stat)
+
+    return t_stat
+
+
+class JointBilateralFilterWithMembership(nn.Module):
     """
-    Joint Bilateral Filter uses guidance image to calculate weights
-    and applies them to the input image.
+    Joint Bilateral Filter with Membership Functions uses guidance image to calculate weights
+    and statistical tests to determine which pixels should be combined.
     """
 
-    def __init__(self, radius=5, sigma_diag=None):
-        super(JointBilateralFilter, self).__init__()
+    def __init__(self, radius=5, sigma_diag=None, alpha=0.005):
+        super(JointBilateralFilterWithMembership, self).__init__()
 
         self.radius = radius
         self.kernel_size = 2 * radius + 1
+        self.alpha = alpha
 
         # Default sigma values if not provided
         if sigma_diag is None:
@@ -59,19 +114,25 @@ class JointBilateralFilter(nn.Module):
             8, self.kernel_size
         )  # 8 channels for guidance (pos, albedo, normals)
 
-    def forward(self, image, guidance, estimands, estimands_variance):
+    def forward(self, image, guidance, estimands, estimands_variance, spp):
         """
         Args:
             image: Input image to denoise [B, C, H, W]
             guidance: Guidance features [B, G, H, W] where G is guidance channels
-                      (positions, albedo, normals)
+                     (positions, albedo, normals)
+            estimands: Pre-computed estimands [B, C, H, W]
+            estimands_variance: Pre-computed variance of estimands [B, C, H, W]
+            spp: Samples per pixel (scalar)
         """
+        # Calculate critical value for statistical test
+        gamma_w = calculate_critical_value(spp, spp, self.alpha).to(image.device)
+
         # Get shifted guidance
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
         n_patches = self.kernel_size * self.kernel_size
 
-        # Reshape guidance to [B, G, H, W] -> [B, n_patches, G, H, W]
+        # Reshape guidance to [B, G*n_patches, H, W] -> [B, n_patches, G, H, W]
         shifted_guidance = shifted_guidance.view(n, n_patches, c, h, w)
 
         # Get center pixel values from guidance
@@ -95,25 +156,63 @@ class JointBilateralFilter(nn.Module):
         mahalanobis_sq = torch.sum(temp * diff_reshaped, dim=3)
         mahalanobis_sq = mahalanobis_sq.reshape(batch, n_patches, height, width)
 
-        # Calculate weight: ρ_ij = exp(-0.5 * mahalanobis_sq)
-        weights = torch.exp(-0.5 * mahalanobis_sq)
+        # Calculate bilateral filter weight: ρ_ij = exp(-0.5 * mahalanobis_sq)
+        bilateral_weights = torch.exp(-0.5 * mahalanobis_sq)
+
+        # Create shifted estimands and variances for statistical testing
+        shifted_estimands = self.shift(estimands)
+        shifted_estimands_variance = self.shift(estimands_variance)
+
+        n, c_img, h, w = estimands.size()
+        shifted_estimands = shifted_estimands.view(n, n_patches, c_img, h, w)
+        shifted_estimands_variance = shifted_estimands_variance.view(
+            n, n_patches, c_img, h, w
+        )
+
+        # Get center pixel estimands and variances
+        center_estimands = estimands.unsqueeze(1)  # [B, 1, C, H, W]
+        center_estimands_variance = estimands_variance.unsqueeze(1)  # [B, 1, C, H, W]
+
+        # Calculate w_ij for each pixel pair and each channel
+        # [B, n_patches, C, H, W], [B, 1, C, H, W] -> [B, n_patches, C, H, W]
+        w_ij = compute_w(
+            center_estimands,
+            shifted_estimands,
+            center_estimands_variance,
+            shifted_estimands_variance,
+        )
+
+        # Calculate t-statistic
+        t_stat = compute_t_statistic(w_ij)  # [B, n_patches, C, H, W]
+
+        # Create membership function (m_ij)
+        # Compare t-stat with gamma_w across all channels
+        # t_stat: [B, n_patches, C, H, W], gamma_w: scalar
+        membership = (
+            (t_stat < gamma_w).all(dim=2, keepdim=True).float()
+        )  # [B, n_patches, 1, H, W]
+
+        # Set center pixel membership to 1
+        membership[:, center_idx : center_idx + 1, :, :, :] = 1.0
+
+        # Apply both bilateral weights and membership function
+        # [B, n_patches, H, W] * [B, n_patches, 1, H, W] -> [B, n_patches, 1, H, W]
+        bilateral_weights = bilateral_weights.unsqueeze(2) * membership
 
         # Apply weights to shifted input image
         shifted_image = self.shift(image)
         n, c_img, h, w = image.size()
         shifted_image = shifted_image.view(n, n_patches, c_img, h, w)
 
-        # Expand weights to match image channels [B, n_patches, H, W] -> [B, n_patches, 1, H, W]
-        weights_expanded = weights.unsqueeze(2)
-
-        # Apply weights to shifted image [B, n_patches, C_img, H, W] * [B, n_patches, 1, H, W]
-        weighted_values = shifted_image * weights_expanded
+        # Apply combined weights to shifted image
+        # [B, n_patches, C_img, H, W] * [B, n_patches, 1, H, W]
+        weighted_values = shifted_image * bilateral_weights
 
         # Sum along patches dimension [B, n_patches, C_img, H, W] -> [B, C_img, H, W]
         weighted_sum = torch.sum(weighted_values, dim=1)
 
-        # Sum of weights for normalization [B, n_patches, H, W] -> [B, 1, H, W]
-        sum_weights = torch.sum(weights, dim=1, keepdim=True)
+        # Sum of weights for normalization [B, n_patches, 1, H, W] -> [B, 1, H, W]
+        sum_weights = torch.sum(bilateral_weights, dim=1)
 
         # Avoid division by zero
         sum_weights = torch.clamp(sum_weights, min=1e-10)
@@ -125,22 +224,33 @@ class JointBilateralFilter(nn.Module):
 
 
 if __name__ == "__main__":
-
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
     bitmap = mi.Bitmap("./cbox.exr")
-    statistics = np.load("./stats.npy")
-    estimands = statistics[:, :, :, 0]
-    estimands_variance = statistics[:, :, :, 1]
-    print(np.shape(estimands))
-    print(np.shape(estimands_variance))
 
-    exit()
+    # Load pre-computed statistics (already in channels-first format)
+    statistics = np.load("./stats.npy")  # [C, H, W, 2]
+    # Extract pre-computed statistics - just add batch dimension
+    estimands = (
+        torch.from_numpy(statistics[:, :, :, 0]).float().unsqueeze(0)
+    )  # [1, C, H, W]
+    estimands_variance = (
+        torch.from_numpy(statistics[:, :, :, 1]).float().unsqueeze(0)
+    )  # [1, C, H, W]
+
+    spp = 32  # Replace with your actual spp value
+
+    # Extract channels from EXR
     res = dict(bitmap.split())
 
-    # Extract channels and convert to PyTorch tensors
+    # Convert to PyTorch tensors
+    image = (
+        torch.from_numpy(np.array(res["<root>"], dtype=np.float32))
+        .permute(2, 0, 1)
+        .unsqueeze(0)
+    )
     albedo = (
         torch.from_numpy(np.array(res["albedo"], dtype=np.float32))
         .permute(2, 0, 1)
@@ -148,11 +258,6 @@ if __name__ == "__main__":
     )
     normals = (
         torch.from_numpy(np.array(res["nn"], dtype=np.float32))
-        .permute(2, 0, 1)
-        .unsqueeze(0)
-    )
-    image = (
-        torch.from_numpy(np.array(res["<root>"], dtype=np.float32))
         .permute(2, 0, 1)
         .unsqueeze(0)
     )
@@ -167,25 +272,31 @@ if __name__ == "__main__":
     # Concatenate guidance features
     guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
 
-    # Initialize joint bilateral filter
-    sigma_diag = torch.tensor(
-        [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
-    )
-    jbf = JointBilateralFilter(radius=20, sigma_diag=sigma_diag)
-
     # Check for CUDA availability
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # Initialize joint bilateral filter with membership
+    sigma_diag = torch.tensor(
+        [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
+    )
+    jbf_with_membership = JointBilateralFilterWithMembership(
+        radius=5, sigma_diag=sigma_diag
+    )
+
     # Move tensors and model to device
-    jbf = jbf.to(device)
+    jbf_with_membership = jbf_with_membership.to(device)
     image = image.to(device)
     guidance = guidance.to(device)
+    estimands = estimands.to(device)
+    estimands_variance = estimands_variance.to(device)
 
     # Time the filtering operation
     start_time = time.time()
     with torch.no_grad():
-        result = jbf(image, guidance)
+        result = jbf_with_membership(
+            image, guidance, estimands, estimands_variance, spp
+        )
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
@@ -194,4 +305,4 @@ if __name__ == "__main__":
 
     # Save result as EXR
     result_bitmap = mi.Bitmap(result_np)
-    result_bitmap.write("denoised_pytorch.exr")
+    result_bitmap.write("denoised_image.exr")
