@@ -114,112 +114,72 @@ class JointBilateralFilterWithMembership(nn.Module):
             8, self.kernel_size
         )  # 8 channels for guidance (pos, albedo, normals)
 
-    def forward(self, image, guidance, estimands, estimands_variance, spp):
-        """
-        Args:
-            image: Input image to denoise [B, C, H, W]
-            guidance: Guidance features [B, G, H, W] where G is guidance channels
-                     (positions, albedo, normals)
-            estimands: Pre-computed estimands [B, C, H, W]
-            estimands_variance: Pre-computed variance of estimands [B, C, H, W]
-            spp: Samples per pixel (scalar)
-        """
-        # Calculate critical value for statistical test
-        gamma_w = calculate_critical_value(spp, spp, self.alpha).to(image.device)
-
-        # Get shifted guidance
+    def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
         n_patches = self.kernel_size * self.kernel_size
-
-        # Reshape guidance to [B, G*n_patches, H, W] -> [B, n_patches, G, H, W]
         shifted_guidance = shifted_guidance.view(n, n_patches, c, h, w)
 
-        # Get center pixel values from guidance
         center_idx = n_patches // 2
         center_guidance = shifted_guidance[:, center_idx : center_idx + 1, :, :, :]
-
-        # Calculate pixel differences (p_j - p_i)
         diff = shifted_guidance - center_guidance
-
-        # Reshape diff for matrix multiplication [B, n_patches, G, H, W] -> [B, n_patches, H, W, G]
         diff = diff.permute(0, 1, 3, 4, 2)
         batch, n_patches, height, width, guidance_channels = diff.shape
         diff_reshaped = diff.reshape(
             batch, n_patches, height * width, guidance_channels
         )
 
-        # Calculate Mahalanobis distance: (p_j - p_i)^T * Σ^(-1) * (p_j - p_i)
-        # [B, n_patches, H*W, G] x [G, G] -> [B, n_patches, H*W, G]
         temp = torch.matmul(diff_reshaped, self.sigma_inv)
-        # Batch matrix multiply: [B, n_patches, H*W, G] x [B, n_patches, H*W, G] -> [B, n_patches, H*W]
         mahalanobis_sq = torch.sum(temp * diff_reshaped, dim=3)
         mahalanobis_sq = mahalanobis_sq.reshape(batch, n_patches, height, width)
 
-        # Calculate bilateral filter weight: ρ_ij = exp(-0.5 * mahalanobis_sq)
-        bilateral_weights = torch.exp(-0.5 * mahalanobis_sq)
+        return torch.exp(-0.5 * mahalanobis_sq)  # bilateral_weights
 
-        # Create shifted estimands and variances for statistical testing
+    def compute_membership(self, estimands, estimands_variance, spp):
+        gamma_w = calculate_critical_value(spp, spp, self.alpha).to(estimands.device)
+        n_patches = self.kernel_size * self.kernel_size
+        center_idx = n_patches // 2
+
         shifted_estimands = self.shift(estimands)
         shifted_estimands_variance = self.shift(estimands_variance)
-
-        n, c_img, h, w = estimands.size()
-        shifted_estimands = shifted_estimands.view(n, n_patches, c_img, h, w)
+        n, c, h, w = estimands.size()
+        shifted_estimands = shifted_estimands.view(n, n_patches, c, h, w)
         shifted_estimands_variance = shifted_estimands_variance.view(
-            n, n_patches, c_img, h, w
+            n, n_patches, c, h, w
         )
 
-        # Get center pixel estimands and variances
-        center_estimands = estimands.unsqueeze(1)  # [B, 1, C, H, W]
-        center_estimands_variance = estimands_variance.unsqueeze(1)  # [B, 1, C, H, W]
+        center_estimands = estimands.unsqueeze(1)
+        center_estimands_variance = estimands_variance.unsqueeze(1)
 
-        # Calculate w_ij for each pixel pair and each channel
-        # [B, n_patches, C, H, W], [B, 1, C, H, W] -> [B, n_patches, C, H, W]
         w_ij = compute_w(
             center_estimands,
             shifted_estimands,
             center_estimands_variance,
             shifted_estimands_variance,
         )
+        t_stat = compute_t_statistic(w_ij)
 
-        # Calculate t-statistic
-        t_stat = compute_t_statistic(w_ij)  # [B, n_patches, C, H, W]
-
-        # Create membership function (m_ij)
-        # Compare t-stat with gamma_w across all channels
-        # t_stat: [B, n_patches, C, H, W], gamma_w: scalar
-        membership = (
-            (t_stat < gamma_w).all(dim=2, keepdim=True).float()
-        )  # [B, n_patches, 1, H, W]
-
-        # Set center pixel membership to 1
+        membership = (t_stat < gamma_w).all(dim=2, keepdim=True).float()
         membership[:, center_idx : center_idx + 1, :, :, :] = 1.0
 
-        # Apply both bilateral weights and membership function
-        # [B, n_patches, H, W] * [B, n_patches, 1, H, W] -> [B, n_patches, 1, H, W]
-        bilateral_weights = bilateral_weights.unsqueeze(2) * membership
+        return membership
 
-        # Apply weights to shifted input image
+    def forward(self, image, guidance, estimands, estimands_variance, spp):
+        n_patches = self.kernel_size * self.kernel_size
+        bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(2)
+        membership = self.compute_membership(estimands, estimands_variance, spp)
+        bilateral_weights = bilateral_weights * membership
+
         shifted_image = self.shift(image)
         n, c_img, h, w = image.size()
         shifted_image = shifted_image.view(n, n_patches, c_img, h, w)
 
-        # Apply combined weights to shifted image
-        # [B, n_patches, C_img, H, W] * [B, n_patches, 1, H, W]
         weighted_values = shifted_image * bilateral_weights
-
-        # Sum along patches dimension [B, n_patches, C_img, H, W] -> [B, C_img, H, W]
         weighted_sum = torch.sum(weighted_values, dim=1)
-
-        # Sum of weights for normalization [B, n_patches, 1, H, W] -> [B, 1, H, W]
         sum_weights = torch.sum(bilateral_weights, dim=1)
-
-        # Avoid division by zero
         sum_weights = torch.clamp(sum_weights, min=1e-10)
 
-        # Calculate final denoised image [B, C_img, H, W] / [B, 1, H, W]
         denoised_image = weighted_sum / sum_weights
-
         return denoised_image
 
 
@@ -228,19 +188,17 @@ if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
-    bitmap = mi.Bitmap("./cbox.exr")
+    bitmap = mi.Bitmap("./staircase.exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./stats.npy")  # [C, H, W, 2]
-    # Extract pre-computed statistics - just add batch dimension
+    statistics = np.load("./stats_staircase.npy")  # [C, H, W, 2]
     estimands = (
-        torch.from_numpy(statistics[:, :, :, 0]).float().unsqueeze(0)
+        torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
     estimands_variance = (
-        torch.from_numpy(statistics[:, :, :, 1]).float().unsqueeze(0)
+        torch.from_numpy(statistics[:, :, :, 1]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
-
-    spp = 32  # Replace with your actual spp value
+    spp = statistics[0, 0, 0, 2]
 
     # Extract channels from EXR
     res = dict(bitmap.split())

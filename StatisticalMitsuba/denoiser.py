@@ -177,7 +177,7 @@ if __name__ == "__main__":
     estimands_variance = statistics[:, :, :, 1]
     estimands = np.transpose(estimands, (1, 2, 0))
     estimands_variance = np.transpose(estimands_variance, (1, 2, 0))
-    spp = 32
+    spp = statistics[0, 0, 0, 2]
     # Test a cada función por separado para comprobar que funcionan correctamente
     gamma_w = calculate_critical_value(spp, spp)
     res = dict(bitmap.split())

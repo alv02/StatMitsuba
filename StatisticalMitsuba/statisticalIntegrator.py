@@ -50,11 +50,12 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             combined_statistics = np.concatenate(
                 [estimands_np, estimands_variance_np], axis=3
             )
+            spp_array = np.full_like(estimands, spp)
 
-            print(combined_statistics.shape)
-            np.save("stats.npy", combined_statistics)
+            combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
+            np.save("stats_staircase.npy", combined_with_spp)
 
-            return combined_statistics
+            return combined_with_spp
 
     def should_stop(self) -> bool:
         return self.real_integrator.should_stop()
@@ -88,7 +89,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/cbox.xml")
+scene = mi.load_file("../scenes/staircase/scene.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("cbox.exr", sensor.film().bitmap())
+mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
