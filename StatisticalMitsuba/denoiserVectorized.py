@@ -3,11 +3,11 @@
 
 import time
 
+import mitsuba as mi
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn import Parameter
 
 
 class Shift(nn.Module):
@@ -59,7 +59,7 @@ class JointBilateralFilter(nn.Module):
             8, self.kernel_size
         )  # 8 channels for guidance (pos, albedo, normals)
 
-    def forward(self, image, guidance):
+    def forward(self, image, guidance, estimands, estimands_variance):
         """
         Args:
             image: Input image to denoise [B, C, H, W]
@@ -125,15 +125,19 @@ class JointBilateralFilter(nn.Module):
 
 
 if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import mitsuba as mi
-    import numpy as np
 
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
-    bitmap = mi.Bitmap("./staircase.exr")
+    bitmap = mi.Bitmap("./cbox.exr")
+    statistics = np.load("./stats.npy")
+    estimands = statistics[:, :, :, 0]
+    estimands_variance = statistics[:, :, :, 1]
+    print(np.shape(estimands))
+    print(np.shape(estimands_variance))
+
+    exit()
     res = dict(bitmap.split())
 
     # Extract channels and convert to PyTorch tensors
@@ -191,15 +195,3 @@ if __name__ == "__main__":
     # Save result as EXR
     result_bitmap = mi.Bitmap(result_np)
     result_bitmap.write("denoised_pytorch.exr")
-
-    # Optional: display result
-    plt.figure(figsize=(12, 6))
-    plt.subplot(121)
-    plt.imshow(np.array(res["<root>"]))
-    plt.title("Original Image")
-    plt.subplot(122)
-    plt.imshow(result_np)
-    plt.title("Denoised Image")
-    plt.tight_layout()
-    plt.savefig("comparison.png")
-    plt.show()

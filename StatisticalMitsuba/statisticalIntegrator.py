@@ -19,14 +19,53 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
-    def online_statistics(self, samples, size, spp):
+    def online_statistics(self, samples, size, spp, epsilon=1e-8):
         if mi.variant() != "scalar_rgb":
             samples_reshaped = dr.reshape(
                 dtype=TensorXf, value=samples, shape=(3, size.y, size.x, spp), order="C"
             )
-            print(np.shape(samples))
-            samples_box_cox = self.box_cox(samples_reshaped)
-            np.save("samples.npy", samples_reshaped)
+            samples_bc = self.box_cox(samples_reshaped)
+            mu = dr.mean(samples_bc, axis=3)
+
+            # Use dr.newaxis to expand the dimension of mu
+            mu_expanded = mu[..., dr.newaxis]
+
+            # Calculate deviations from the mean (centralization)
+            delta = (
+                samples_bc - mu_expanded
+            )  # Now shapes are compatible for broadcasting
+
+            # Rest of your code
+            M2 = dr.mean(delta**2, axis=3)
+            M3 = dr.mean(delta**3, axis=3)
+
+            # Calculate variance (Bessel-corrected)
+            variance = M2 * spp / (spp - 1)  # This applies the Bessel correction
+            variance = dr.maximum(variance, epsilon)
+
+            estimands = mu + M3 / (6 * variance * spp)
+            estimands_variance = variance / spp
+
+            # Use dr.newaxis for adding dimensions
+            estimands_expanded = estimands[..., dr.newaxis]
+            estimands_variance_expanded = estimands_variance[..., dr.newaxis]
+
+            # For concatenation, you might need to convert to numpy first if dr.concat isn't available
+            # Option 1: If dr.concat is available
+            # combined_statistics = dr.concat([estimands_expanded, estimands_variance_expanded], axis=3)
+
+            # Option 2: If dr.concat isn't available, detach and use numpy
+            estimands_np = dr.detach(estimands_expanded)
+            estimands_variance_np = dr.detach(estimands_variance_expanded)
+            combined_statistics = np.concatenate(
+                [estimands_np, estimands_variance_np], axis=3
+            )
+
+            print(combined_statistics.shape)
+            np.save("stats.npy", combined_statistics)
+
+            return combined_statistics
+            return combined_statistics
 
     def should_stop(self) -> bool:
         return self.real_integrator.should_stop()
@@ -60,7 +99,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/staircase/scene.xml")
+scene = mi.load_file("../scenes/cbox.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
 mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
