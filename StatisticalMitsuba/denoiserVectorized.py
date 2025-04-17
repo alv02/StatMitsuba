@@ -12,25 +12,30 @@ from torch import nn
 
 
 class Shift(nn.Module):
-    def __init__(self, in_planes, kernel_size=3):
-        super(Shift, self).__init__()
-        self.in_planes = in_planes
-        self.kernel_size = kernel_size
-        self.pad = kernel_size // 2
+    def __init__(self, radius):
+        super().__init__()
+        self.radius = radius
+        self.kernel_size = 2 * radius + 1
 
     def forward(self, x):
-        n, c, h, w = x.size()
-        x_pad = F.pad(x, (self.pad, self.pad, self.pad, self.pad))
+        B, C, H, W = x.shape
+        # Use reflection padding like in the original
+        x_pad = F.pad(
+            x, (self.radius, self.radius, self.radius, self.radius), mode="reflect"
+        )
 
-        cat_layers = []
-        for y in range(self.kernel_size):
-            y2 = y + h
-            for x in range(self.kernel_size):
-                x2 = x + w
-                xx = x_pad[:, :, y:y2, x:x2]
-                cat_layers.append(xx)
+        # Extract patches using unfold (similar to what you already had)
+        patches = F.unfold(x_pad, kernel_size=self.kernel_size, padding=0)
 
-        return torch.cat(cat_layers, 1)
+        # Reshape to [B, C, K*K, H, W] with proper ordering
+        patches = patches.view(B, C, self.kernel_size**2, H, W)
+
+        # Reshape to match your original expected output format
+        patches = patches.permute(0, 2, 1, 3, 4).reshape(
+            B, self.kernel_size**2 * C, H, W
+        )
+
+        return patches
 
 
 class StatDenoiser(nn.Module):
@@ -57,9 +62,7 @@ class StatDenoiser(nn.Module):
         self.register_buffer("sigma_inv", torch.inverse(sigma))
 
         # Create shift operator
-        self.shift = Shift(
-            8, self.kernel_size
-        )  # 8 channels for guidance (pos, albedo, normals)
+        self.shift = Shift(radius)
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -190,10 +193,10 @@ if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
-    bitmap = mi.Bitmap("./cbox.exr")
+    bitmap = mi.Bitmap("./staircase.exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./stats_cbox.npy")  # [C, H, W, 2]
+    statistics = np.load("./stats_staircase.npy")  # [C, H, W, 3]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
@@ -240,7 +243,7 @@ if __name__ == "__main__":
     sigma_diag = torch.tensor(
         [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
     )
-    jbf_with_membership = StatDenoiser(radius=5, sigma_diag=sigma_diag)
+    jbf_with_membership = StatDenoiser(radius=20, sigma_diag=sigma_diag)
 
     # Move tensors and model to device
     jbf_with_membership = jbf_with_membership.to(device)
