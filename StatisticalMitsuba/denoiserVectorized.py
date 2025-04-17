@@ -33,59 +33,6 @@ class Shift(nn.Module):
         return torch.cat(cat_layers, 1)
 
 
-def calculate_critical_value(n_i, n_j, alpha=0.005):
-    """Calculate critical value using t-distribution."""
-    # Calculate degrees of freedom
-    degrees_of_freedom = n_i + n_j - 2
-
-    # Calculate critical value from t-distribution
-    gamma_w = stats.t.ppf(1 - alpha / 2, degrees_of_freedom)
-
-    return torch.tensor(gamma_w, dtype=torch.float32)
-
-
-def compute_w(
-    estimand_i, estimand_j, estimand_i_variance, estimand_j_variance, epsilon=1e-8
-):
-    """Compute optimal weight w_ij between pixels i and j."""
-    numerator = (
-        2 * (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
-    )
-    denominator = 2 * (
-        (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
-    )
-
-    # Avoid division by zero
-    denominator = torch.clamp(denominator, min=epsilon)
-
-    # Compute result
-    result = numerator / denominator
-
-    # Handle special case where both numerator and denominator are 0
-
-    result = torch.where(
-        (numerator == 0) & (denominator == 0),
-        torch.full_like(numerator, 0.5),
-        numerator / denominator,
-    )
-
-    return result
-
-
-def compute_t_statistic(w_ij, epsilon=1e-8):
-    """Calculate t-statistic for comparing pixels."""
-    # Handle w_ij = 1 case (return infinity)
-    infinity_mask = w_ij == 1
-
-    # Calculate t-statistic
-    t_stat = torch.sqrt((1 / (2 * (1 - w_ij + epsilon))) - 1)
-
-    # Set infinity values
-    t_stat = torch.where(infinity_mask, torch.tensor(float("inf")), t_stat)
-
-    return t_stat
-
-
 class JointBilateralFilterWithMembership(nn.Module):
     """
     Joint Bilateral Filter with Membership Functions uses guidance image to calculate weights
@@ -114,6 +61,61 @@ class JointBilateralFilterWithMembership(nn.Module):
             8, self.kernel_size
         )  # 8 channels for guidance (pos, albedo, normals)
 
+    def compute_gamma_w(self, n_i, n_j, alpha=0.005):
+        """Calculate critical value using t-distribution."""
+        # Calculate degrees of freedom
+        degrees_of_freedom = n_i + n_j - 2
+
+        # Calculate critical value from t-distribution
+        gamma_w = stats.t.ppf(1 - alpha / 2, degrees_of_freedom)
+
+        return torch.tensor(gamma_w, dtype=torch.float32)
+
+    def compute_gamma(self, n_i, n_j, alpha=0.005):
+        gamma_w = self.compute_gamma_w(n_i, n_j, alpha)
+        return 1 / (2 * (gamma_w**2 + 1))
+
+    def compute_w(
+        self, estimand_i, estimand_j, estimand_i_variance, estimand_j_variance
+    ):
+        """Compute optimal weight w_ij between pixels i and j."""
+        numerator = (
+            2 * (estimand_i - estimand_j) ** 2
+            + estimand_i_variance
+            + estimand_j_variance
+        )
+        denominator = 2 * (
+            (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
+        )
+
+        # Avoid division by zero
+        denominator_safe = torch.where(denominator == 0, 1, denominator)
+
+        # Compute result
+        result = numerator / denominator_safe
+
+        # Handle special case where both numerator and denominator are 0
+
+        result = torch.where(
+            (numerator == 0) & (denominator == 0),
+            torch.full_like(numerator, 0.5),
+            numerator / denominator,
+        )
+        variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
+        values_differ = estimand_i != estimand_j
+        result = torch.where(
+            variance_zero & values_differ, torch.full_like(numerator, 1), result
+        )
+        return result
+
+    def compute_t_statistic(self, w_ij):
+        """Calculate t-statistic for comparing pixels."""
+        return torch.where(
+            w_ij == 1,
+            float("inf"),  # Si w_ij es 1, devuelve infinito
+            torch.sqrt((1 / (2 * (1 - w_ij))) - 1),
+        )
+
     def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
@@ -136,7 +138,7 @@ class JointBilateralFilterWithMembership(nn.Module):
         return torch.exp(-0.5 * mahalanobis_sq)  # bilateral_weights
 
     def compute_membership(self, estimands, estimands_variance, spp):
-        gamma_w = calculate_critical_value(spp, spp, self.alpha).to(estimands.device)
+        gamma_w = self.compute_gamma_w(spp, spp, self.alpha).to(estimands.device)
         n_patches = self.kernel_size * self.kernel_size
         center_idx = n_patches // 2
 
@@ -151,13 +153,13 @@ class JointBilateralFilterWithMembership(nn.Module):
         center_estimands = estimands.unsqueeze(1)
         center_estimands_variance = estimands_variance.unsqueeze(1)
 
-        w_ij = compute_w(
+        w_ij = self.compute_w(
             center_estimands,
             shifted_estimands,
             center_estimands_variance,
             shifted_estimands_variance,
         )
-        t_stat = compute_t_statistic(w_ij)
+        t_stat = self.compute_t_statistic(w_ij)
 
         membership = (t_stat < gamma_w).all(dim=2, keepdim=True).float()
         membership[:, center_idx : center_idx + 1, :, :, :] = 1.0
@@ -188,10 +190,10 @@ if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
-    bitmap = mi.Bitmap("./staircase.exr")
+    bitmap = mi.Bitmap("./cbox.exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./stats_staircase.npy")  # [C, H, W, 2]
+    statistics = np.load("./stats_cbox.npy")  # [C, H, W, 2]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
@@ -263,4 +265,4 @@ if __name__ == "__main__":
 
     # Save result as EXR
     result_bitmap = mi.Bitmap(result_np)
-    result_bitmap.write("denoised_image.exr")
+    result_bitmap.write("denoised_image_v.exr")

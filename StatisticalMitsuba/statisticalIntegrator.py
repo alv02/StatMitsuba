@@ -19,7 +19,7 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
     def box_cox(self, samples, lam=0.5):
         return dr.log(samples) if lam == 0 else ((dr.power(samples, lam) - 1) / lam)
 
-    def online_statistics(self, samples, size, spp, epsilon=1e-8):
+    def online_statistics(self, samples, size, spp):
         if mi.variant() != "scalar_rgb":
             samples_reshaped = dr.reshape(
                 dtype=TensorXf, value=samples, shape=(3, size.y, size.x, spp), order="C"
@@ -38,8 +38,8 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
 
             # Calculate variance (Bessel-corrected)
             variance = np.var(samples_bc, axis=3, ddof=1)
-            variance = np.where(variance == 0, epsilon, variance)
-            estimands = mu + M3 / (6 * variance * spp)
+            # When the variance is 0 there is no need for skewness correction
+            estimands = np.where(variance == 0, mu, mu + M3 / (6 * variance * spp))
             estimands_variance = variance / spp
 
             estimands_expanded = estimands[..., dr.newaxis]
@@ -51,9 +51,10 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
                 [estimands_np, estimands_variance_np], axis=3
             )
             spp_array = np.full_like(estimands, spp)
+            spp_array = spp_array[..., np.newaxis]
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
-            np.save("stats_staircase.npy", combined_with_spp)
+            np.save("stats_cbox.npy", combined_with_spp)
 
             return combined_with_spp
 
@@ -89,7 +90,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/staircase/scene.xml")
+scene = mi.load_file("../scenes/cbox.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
+mi.util.write_bitmap("cbox.exr", sensor.film().bitmap())

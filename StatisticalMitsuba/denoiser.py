@@ -39,12 +39,13 @@ def compute_w(estimand_i, estimand_j, estimand_i_variance, estimand_j_variance):
     # Evitar división por 0 pero mantener los casos donde ambos sean 0
     denominator_safe = np.where(denominator == 0, 1, denominator)
 
-    # Computar resultado normal
     result = numerator / denominator_safe
 
-    # Si en un canal específico el numerador y el denominador son 0, ese canal se pone en 1
-    result = np.where((numerator == 0) & (denominator == 0), 1, result)
+    result = np.where((numerator == 0) & (denominator == 0), 0.5, result)
 
+    variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
+    values_differ = estimand_i != estimand_j
+    result = np.where(variance_zero & values_differ, np.full_like(numerator, 1), result)
     return result
 
 
@@ -63,13 +64,11 @@ def denoiser(
     image,
     albedo,
     normals,
-    n,
+    gamma_w,
     estimands,
     estimands_variance,
-    gamma_w,
     sigma,
     radius=5,
-    epsilon=1e-8,
 ):
     height, width, channels = np.shape(image)
 
@@ -168,7 +167,7 @@ def denoiser(
 
 if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
-    statistics = np.load("./stats.npy")
+    statistics = np.load("./stats_cbox.npy")
     # albedo:ch7-9 normales:ch10-12
     bitmap = mi.Bitmap("./cbox.exr")
     res = dict(bitmap.split())
@@ -179,21 +178,20 @@ if __name__ == "__main__":
     estimands_variance = np.transpose(estimands_variance, (1, 2, 0))
     spp = statistics[0, 0, 0, 2]
     # Test a cada función por separado para comprobar que funcionan correctamente
-    gamma_w = calculate_critical_value(spp, spp)
     res = dict(bitmap.split())
     albedo = np.array(res["albedo"])
     normals = np.array(res["nn"])
     image = np.array(res["<root>"])
 
+    gamma_w = calculate_critical_value(spp, spp)
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
     result = denoiser(
         image,
         albedo,
         normals,
-        spp,
+        gamma_w,
         estimands,
         estimands_variance,
-        gamma_w,
         sigma,
         radius=5,
     )
