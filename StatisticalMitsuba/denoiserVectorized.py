@@ -20,7 +20,7 @@ class Shift(nn.Module):
 
     def forward(self, x):
         n, c, h, w = x.size()
-        x_pad = F.pad(x, (self.pad, self.pad, self.pad, self.pad), mode="reflect")
+        x_pad = F.pad(x, (self.pad, self.pad, self.pad, self.pad))
 
         cat_layers = []
         for y in range(self.kernel_size):
@@ -33,14 +33,14 @@ class Shift(nn.Module):
         return torch.cat(cat_layers, 1)
 
 
-class JointBilateralFilterWithMembership(nn.Module):
+class StatDenoiser(nn.Module):
     """
     Joint Bilateral Filter with Membership Functions uses guidance image to calculate weights
     and statistical tests to determine which pixels should be combined.
     """
 
     def __init__(self, radius=5, sigma_diag=None, alpha=0.005):
-        super(JointBilateralFilterWithMembership, self).__init__()
+        super(StatDenoiser, self).__init__()
 
         self.radius = radius
         self.kernel_size = 2 * radius + 1
@@ -240,9 +240,7 @@ if __name__ == "__main__":
     sigma_diag = torch.tensor(
         [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
     )
-    jbf_with_membership = JointBilateralFilterWithMembership(
-        radius=5, sigma_diag=sigma_diag
-    )
+    jbf_with_membership = StatDenoiser(radius=5, sigma_diag=sigma_diag)
 
     # Move tensors and model to device
     jbf_with_membership = jbf_with_membership.to(device)
