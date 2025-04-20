@@ -34,6 +34,9 @@ class Shift(nn.Module):
         patches = patches.permute(0, 2, 1, 3, 4).reshape(
             B, self.kernel_size**2 * C, H, W
         )
+        print(x.shape)
+        print(patches.shape)
+        exit()
 
         return patches
 
