@@ -1,0 +1,6 @@
+1. Resolver variance = 0, en vez de usar epsilon solo membership = 1 si las medias son iguales si no descartar, ver articul 4.1.d
+2. Guardar en los aovs, en vez de todas las estadisticas solo las finales, estimand y variance
+3. Vectorizar, por que no optimiza al no usar mat.mul
+4. Problema: Radio = 20, peta memoria, hay que ver como tilear la imagen patcheada(con vecinos)
+
+

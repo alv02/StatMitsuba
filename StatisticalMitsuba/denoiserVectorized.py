@@ -1,8 +1,13 @@
 #!/usr/bin/python
 # Joint Bilateral Filter with Membership Functions in PyTorch (Simplified)
 
+import os
 import time
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import mitsuba as mi
 import numpy as np
 import torch
@@ -12,20 +17,23 @@ from torch import nn
 
 
 class Shift(nn.Module):
+    """
+    Creates a tensor with the neighbours of each pixel
+    """
+
     def __init__(self, radius):
         super().__init__()
         self.radius = radius
         self.kernel_size = 2 * radius + 1
 
     def forward(self, x):
+        """
+        x (B, C, H, W)
+        returns (B, K*K*C, H, W)
+        """
         B, C, H, W = x.shape
-        # Use reflection padding like in the original
-        x_pad = F.pad(
-            x, (self.radius, self.radius, self.radius, self.radius), mode="reflect"
-        )
-
         # Extract patches using unfold (similar to what you already had)
-        patches = F.unfold(x_pad, kernel_size=self.kernel_size, padding=0)
+        patches = F.unfold(x, kernel_size=self.kernel_size, padding=self.radius)
 
         # Reshape to [B, C, K*K, H, W] with proper ordering
         patches = patches.view(B, C, self.kernel_size**2, H, W)
@@ -34,9 +42,6 @@ class Shift(nn.Module):
         patches = patches.permute(0, 2, 1, 3, 4).reshape(
             B, self.kernel_size**2 * C, H, W
         )
-        print(x.shape)
-        print(patches.shape)
-        exit()
 
         return patches
 
@@ -47,25 +52,61 @@ class StatDenoiser(nn.Module):
     and statistical tests to determine which pixels should be combined.
     """
 
-    def __init__(self, radius=5, sigma_diag=None, alpha=0.005):
+    def __init__(self, radius=5, alpha=0.005, debug_pixels=None):
         super(StatDenoiser, self).__init__()
 
         self.radius = radius
         self.kernel_size = 2 * radius + 1
         self.alpha = alpha
+        self.n_patches = self.kernel_size**2
+
+        # Debug parameters
+        self.debug_pixels = debug_pixels  # List of (y, x) coordinates to debug
 
         # Default sigma values if not provided
-        if sigma_diag is None:
-            sigma_diag = torch.tensor(
-                [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
-            )
-
-        # Create sigma matrix and its inverse
-        sigma = torch.diag(sigma_diag)
-        self.register_buffer("sigma_inv", torch.inverse(sigma))
+        self.sigma_inv = torch.tensor(
+            [0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
+        )
+        self.sigma_inv = self.sigma_inv.repeat(self.kernel_size**2)
+        self.sigma_inv = self.sigma_inv.view(1, self.n_patches, -1, 1, 1)
 
         # Create shift operator
         self.shift = Shift(radius)
+
+    def debug(self, weights_jbf, membership):
+        _, _, _, H, W = membership.shape
+        if self.debug_pixels:
+            os.makedirs("debug_output", exist_ok=True)  # crea carpeta si no existe
+            for x, y in self.debug_pixels:
+                if 0 <= y < H and 0 <= x < W:
+                    weights = (
+                        weights_jbf[0, :, 0, y, x]
+                        .cpu()
+                        .numpy()
+                        .reshape(self.kernel_size, self.kernel_size)
+                    )
+                    mem = (
+                        membership[0, :, 0, y, x]
+                        .cpu()
+                        .numpy()
+                        .reshape(self.kernel_size, self.kernel_size)
+                    )
+
+                    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+                    fig.suptitle(f"Debug Pixel ({y}, {x})")
+
+                    im0 = axs[0].imshow(weights, cmap="viridis")
+                    axs[0].set_title("Bilateral Weights")
+                    fig.colorbar(im0, ax=axs[0])
+
+                    im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
+                    axs[1].set_title("Membership")
+                    fig.colorbar(im1, ax=axs[1])
+
+                    # Guarda la figura en un archivo
+                    fig_path = f"debug_output/pixel_{y}_{x}.png"
+                    plt.savefig(fig_path, dpi=300)
+                    plt.close(fig)  # cierra la figura para liberar memoria
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -112,6 +153,7 @@ class StatDenoiser(nn.Module):
         result = torch.where(
             variance_zero & values_differ, torch.full_like(numerator, 1), result
         )
+
         return result
 
     def compute_t_statistic(self, w_ij):
@@ -125,35 +167,38 @@ class StatDenoiser(nn.Module):
     def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
-        n_patches = self.kernel_size * self.kernel_size
-        shifted_guidance = shifted_guidance.view(n, n_patches, c, h, w)
+        shifted_guidance = shifted_guidance.view(n, self.n_patches, c, h, w)
 
-        center_idx = n_patches // 2
+        # Get center guidance
+        center_idx = self.n_patches // 2
         center_guidance = shifted_guidance[:, center_idx : center_idx + 1, :, :, :]
+
         diff = shifted_guidance - center_guidance
-        diff = diff.permute(0, 1, 3, 4, 2)
-        batch, n_patches, height, width, guidance_channels = diff.shape
-        diff_reshaped = diff.reshape(
-            batch, n_patches, height * width, guidance_channels
-        )
 
-        temp = torch.matmul(diff_reshaped, self.sigma_inv)
-        mahalanobis_sq = torch.sum(temp * diff_reshaped, dim=3)
-        mahalanobis_sq = mahalanobis_sq.reshape(batch, n_patches, height, width)
+        diff_squared = diff**2
 
-        return torch.exp(-0.5 * mahalanobis_sq)  # bilateral_weights
+        # Apply weights (in-place operation)
+        weighted_diff = diff_squared * self.sigma_inv
+
+        result = weighted_diff.sum(dim=2)
+
+        # Exponential (in-place)
+        bilateral_weights = torch.exp_(
+            -0.5 * result
+        )  # Use exp_ for in-place if available
+
+        return bilateral_weights
 
     def compute_membership(self, estimands, estimands_variance, spp):
         gamma_w = self.compute_gamma_w(spp, spp, self.alpha).to(estimands.device)
-        n_patches = self.kernel_size * self.kernel_size
-        center_idx = n_patches // 2
+        center_idx = self.n_patches // 2
 
         shifted_estimands = self.shift(estimands)
         shifted_estimands_variance = self.shift(estimands_variance)
         n, c, h, w = estimands.size()
-        shifted_estimands = shifted_estimands.view(n, n_patches, c, h, w)
+        shifted_estimands = shifted_estimands.view(n, self.n_patches, c, h, w)
         shifted_estimands_variance = shifted_estimands_variance.view(
-            n, n_patches, c, h, w
+            n, self.n_patches, c, h, w
         )
 
         center_estimands = estimands.unsqueeze(1)
@@ -173,21 +218,23 @@ class StatDenoiser(nn.Module):
         return membership
 
     def forward(self, image, guidance, estimands, estimands_variance, spp):
-        n_patches = self.kernel_size * self.kernel_size
         bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(2)
         membership = self.compute_membership(estimands, estimands_variance, spp)
-        bilateral_weights = bilateral_weights * membership
+        final_weights = bilateral_weights * membership
 
         shifted_image = self.shift(image)
         n, c_img, h, w = image.size()
-        shifted_image = shifted_image.view(n, n_patches, c_img, h, w)
+        shifted_image = shifted_image.view(n, self.n_patches, c_img, h, w)
 
-        weighted_values = shifted_image * bilateral_weights
+        weighted_values = shifted_image * final_weights
         weighted_sum = torch.sum(weighted_values, dim=1)
-        sum_weights = torch.sum(bilateral_weights, dim=1)
+        sum_weights = torch.sum(final_weights, dim=1)
         sum_weights = torch.clamp(sum_weights, min=1e-10)
 
         denoised_image = weighted_sum / sum_weights
+
+        if self.debug_pixels:
+            self.debug(bilateral_weights, membership)
         return denoised_image
 
 
@@ -196,10 +243,10 @@ if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
 
     # Load the EXR file
-    bitmap = mi.Bitmap("./staircase.exr")
+    bitmap = mi.Bitmap("./cbox.exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./stats_staircase.npy")  # [C, H, W, 3]
+    statistics = np.load("./stats_cbox.npy")  # [C, H, W, 3]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
@@ -242,14 +289,14 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
+    # Define debug pixels - modify these to the coordinates you want to examine
+    debug_pixels = [(168, 217)]
+
     # Initialize joint bilateral filter with membership
-    sigma_diag = torch.tensor(
-        [10.0, 10.0, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1], dtype=torch.float32
-    )
-    jbf_with_membership = StatDenoiser(radius=20, sigma_diag=sigma_diag)
+    stat_denoiser = StatDenoiser(radius=5, debug_pixels=debug_pixels)
 
     # Move tensors and model to device
-    jbf_with_membership = jbf_with_membership.to(device)
+    stat_denoiser = stat_denoiser.to(device)
     image = image.to(device)
     guidance = guidance.to(device)
     estimands = estimands.to(device)
@@ -258,9 +305,7 @@ if __name__ == "__main__":
     # Time the filtering operation
     start_time = time.time()
     with torch.no_grad():
-        result = jbf_with_membership(
-            image, guidance, estimands, estimands_variance, spp
-        )
+        result = stat_denoiser(image, guidance, estimands, estimands_variance, spp)
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
