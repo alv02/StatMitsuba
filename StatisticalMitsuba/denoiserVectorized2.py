@@ -25,17 +25,24 @@ class Shift(nn.Module):
         super().__init__()
         self.radius = radius
         self.kernel_size = 2 * radius + 1
-        self.n_patches = self.kernel_size**2
 
     def forward(self, x):
         """
         x (B, C, H, W)
-        returns (B, C*K**2, H, W)
+        returns (B, K*K*C, H, W)
         """
         B, C, H, W = x.shape
         # Extract patches using unfold (similar to what you already had)
         patches = F.unfold(x, kernel_size=self.kernel_size, padding=self.radius)
-        patches = patches.view(1, C * self.n_patches, H, W)
+
+        # Reshape to [B, C, K*K, H, W] with proper ordering
+        patches = patches.view(B, C, self.kernel_size**2, H, W)
+
+        # Reshape to match your original expected output format
+        patches = patches.permute(0, 2, 1, 3, 4).reshape(
+            B, self.kernel_size**2 * C, H, W
+        )
+
         return patches
 
 
@@ -56,14 +63,12 @@ class StatDenoiser(nn.Module):
         # Debug parameters
         self.debug_pixels = debug_pixels  # List of (y, x) coordinates to debug
 
-        # Sigma_inv(1, C*n_patches, 1, 1)
+        # Default sigma values if not provided
         self.sigma_inv = torch.tensor(
             [0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
         )
-        self.sigma_inv = self.sigma_inv.repeat(self.n_patches)
+        self.sigma_inv = self.sigma_inv.repeat(self.kernel_size**2)
         self.sigma_inv = self.sigma_inv.view(1, self.n_patches, -1, 1, 1)
-        self.sigma_inv = torch.permute(self.sigma_inv, (0, 2, 1, 3, 4))
-        self.sigma_inv = torch.reshape(self.sigma_inv, (1, -1, self.n_patches, 1, 1))
 
         # Create shift operator
         self.shift = Shift(radius)
@@ -75,13 +80,13 @@ class StatDenoiser(nn.Module):
             for x, y in self.debug_pixels:
                 if 0 <= y < H and 0 <= x < W:
                     weights = (
-                        weights_jbf[0, 0, :, y, x]
+                        weights_jbf[0, :, 0, y, x]
                         .cpu()
                         .numpy()
                         .reshape(self.kernel_size, self.kernel_size)
                     )
                     mem = (
-                        membership[0, 0, :, y, x]
+                        membership[0, :, 0, y, x]
                         .cpu()
                         .numpy()
                         .reshape(self.kernel_size, self.kernel_size)
@@ -162,11 +167,11 @@ class StatDenoiser(nn.Module):
     def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
-        shifted_guidance = shifted_guidance.view(n, c, self.n_patches, h, w)
+        shifted_guidance = shifted_guidance.view(n, self.n_patches, c, h, w)
 
         # Get center guidance
         center_idx = self.n_patches // 2
-        center_guidance = shifted_guidance[:, :, center_idx : center_idx + 1, :, :]
+        center_guidance = shifted_guidance[:, center_idx : center_idx + 1, :, :, :]
 
         diff = shifted_guidance - center_guidance
 
@@ -175,7 +180,7 @@ class StatDenoiser(nn.Module):
         # Apply weights (in-place operation)
         weighted_diff = diff_squared * self.sigma_inv
 
-        result = weighted_diff.sum(dim=1)
+        result = weighted_diff.sum(dim=2)
 
         # Exponential (in-place)
         bilateral_weights = torch.exp_(
@@ -190,14 +195,14 @@ class StatDenoiser(nn.Module):
 
         shifted_estimands = self.shift(estimands)
         shifted_estimands_variance = self.shift(estimands_variance)
-        b, c, h, w = estimands.size()
-        shifted_estimands = shifted_estimands.view(b, c, self.n_patches, h, w)
+        n, c, h, w = estimands.size()
+        shifted_estimands = shifted_estimands.view(n, self.n_patches, c, h, w)
         shifted_estimands_variance = shifted_estimands_variance.view(
-            b, c, self.n_patches, h, w
+            n, self.n_patches, c, h, w
         )
 
-        center_estimands = estimands.unsqueeze(2)
-        center_estimands_variance = estimands_variance.unsqueeze(2)
+        center_estimands = estimands.unsqueeze(1)
+        center_estimands_variance = estimands_variance.unsqueeze(1)
 
         w_ij = self.compute_w(
             center_estimands,
@@ -207,23 +212,23 @@ class StatDenoiser(nn.Module):
         )
         t_stat = self.compute_t_statistic(w_ij)
 
-        membership = (t_stat < gamma_w).all(dim=1, keepdim=True).float()
-        membership[:, :, center_idx : center_idx + 1, :, :] = 1.0
+        membership = (t_stat < gamma_w).all(dim=2, keepdim=True).float()
+        membership[:, center_idx : center_idx + 1, :, :, :] = 1.0
 
         return membership
 
     def forward(self, image, guidance, estimands, estimands_variance, spp):
-        bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(1)
+        bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(2)
         membership = self.compute_membership(estimands, estimands_variance, spp)
         final_weights = bilateral_weights * membership
 
         shifted_image = self.shift(image)
         n, c_img, h, w = image.size()
-        shifted_image = shifted_image.view(n, c_img, self.n_patches, h, w)
+        shifted_image = shifted_image.view(n, self.n_patches, c_img, h, w)
 
         weighted_values = shifted_image * final_weights
-        weighted_sum = torch.sum(weighted_values, dim=2)
-        sum_weights = torch.sum(final_weights, dim=2)
+        weighted_sum = torch.sum(weighted_values, dim=1)
+        sum_weights = torch.sum(final_weights, dim=1)
         sum_weights = torch.clamp(sum_weights, min=1e-10)
 
         denoised_image = weighted_sum / sum_weights
