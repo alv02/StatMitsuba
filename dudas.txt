@@ -1,2 +1,0 @@
-1. En el joint bilateral filter el rgb debe ser 0-1 no?
-2. Fig6: More discerning, no sería al reves?

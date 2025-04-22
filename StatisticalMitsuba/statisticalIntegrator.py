@@ -33,7 +33,6 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             # Calculate deviations from the mean (centralization)
             delta = samples_bc - mu_expanded
 
-            M2 = dr.mean(delta**2, axis=3)
             M3 = dr.mean(delta**3, axis=3)
 
             # Calculate variance (Bessel-corrected)
@@ -54,8 +53,8 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             spp_array = spp_array[..., np.newaxis]
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
-            np.save("stats_staircase.npy", combined_with_spp)
 
+            np.save("stats.npy", combined_with_spp)
             return combined_with_spp
 
     def should_stop(self) -> bool:
@@ -90,7 +89,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/staircase/scene.xml")
+scene = mi.load_file("../scenes/volumetric.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("staircase.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./volumetric.exr", sensor.film().bitmap())

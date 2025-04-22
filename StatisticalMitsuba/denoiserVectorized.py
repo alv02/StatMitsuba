@@ -68,40 +68,57 @@ class StatDenoiser(nn.Module):
         # Create shift operator
         self.shift = Shift(radius)
 
-    def debug(self, weights_jbf, membership):
+    def debug(self, weights_jbf, membership, final_weights):
         _, _, _, H, W = membership.shape
         if self.debug_pixels:
-            os.makedirs("debug_output", exist_ok=True)  # crea carpeta si no existe
+            os.makedirs("debug_output", exist_ok=True)  # Crea la carpeta si no existe
             for x, y in self.debug_pixels:
                 if 0 <= y < H and 0 <= x < W:
+                    # Extracción de los pesos JBF
                     weights = (
                         weights_jbf[0, 0, :, y, x]
                         .cpu()
                         .numpy()
                         .reshape(self.kernel_size, self.kernel_size)
                     )
+                    # Extracción de los pesos de membership
                     mem = (
                         membership[0, 0, :, y, x]
                         .cpu()
                         .numpy()
                         .reshape(self.kernel_size, self.kernel_size)
                     )
+                    # Extracción de los pesos finales
+                    final_w = (
+                        final_weights[0, 0, :, y, x]
+                        .cpu()
+                        .numpy()
+                        .reshape(self.kernel_size, self.kernel_size)
+                    )
 
-                    fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-                    fig.suptitle(f"Debug Pixel ({y}, {x})")
+                    # Creación de la figura para mostrar los tres mapas
+                    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+                    fig.suptitle(f"Debug Pixel ({x}, {y})")
 
+                    # Mostrar pesos JBF
                     im0 = axs[0].imshow(weights, cmap="viridis")
                     axs[0].set_title("Bilateral Weights")
                     fig.colorbar(im0, ax=axs[0])
 
+                    # Mostrar los valores de membership
                     im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
                     axs[1].set_title("Membership")
                     fig.colorbar(im1, ax=axs[1])
 
+                    # Mostrar los pesos finales
+                    im2 = axs[2].imshow(final_w, cmap="viridis")
+                    axs[2].set_title("Final Weights")
+                    fig.colorbar(im2, ax=axs[2])
+
                     # Guarda la figura en un archivo
-                    fig_path = f"debug_output/pixel_{y}_{x}.png"
+                    fig_path = f"debug_output/pixel_{x}_{y}.png"
                     plt.savefig(fig_path, dpi=300)
-                    plt.close(fig)  # cierra la figura para liberar memoria
+                    plt.close(fig)  # Cierra la figura para liberar memoria
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -143,6 +160,7 @@ class StatDenoiser(nn.Module):
             torch.full_like(numerator, 0.5),
             numerator / denominator,
         )
+
         variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
         values_differ = estimand_i != estimand_j
         result = torch.where(
@@ -213,6 +231,7 @@ class StatDenoiser(nn.Module):
         return membership
 
     def forward(self, image, guidance, estimands, estimands_variance, spp):
+        # Shapes (B, 1, n_patches, H, W)
         bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(1)
         membership = self.compute_membership(estimands, estimands_variance, spp)
         final_weights = bilateral_weights * membership
@@ -221,15 +240,14 @@ class StatDenoiser(nn.Module):
         n, c_img, h, w = image.size()
         shifted_image = shifted_image.view(n, c_img, self.n_patches, h, w)
 
-        weighted_values = shifted_image * final_weights
-        weighted_sum = torch.sum(weighted_values, dim=2)
         sum_weights = torch.sum(final_weights, dim=2)
         sum_weights = torch.clamp(sum_weights, min=1e-10)
-
-        denoised_image = weighted_sum / sum_weights
+        final_weights = final_weights / sum_weights
+        weighted_values = shifted_image * final_weights
+        denoised_image = torch.sum(weighted_values, dim=2)
 
         if self.debug_pixels:
-            self.debug(bilateral_weights, membership)
+            self.debug(bilateral_weights, membership, final_weights)
         return denoised_image
 
 
@@ -237,11 +255,13 @@ if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
+    scene = "./volumetric"
+
     # Load the EXR file
-    bitmap = mi.Bitmap("./cbox.exr")
+    bitmap = mi.Bitmap(scene + ".exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./stats_cbox.npy")  # [C, H, W, 3]
+    statistics = np.load(scene + "_stats.npy")  # [C, H, W, 3]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
@@ -285,7 +305,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(168, 217)]
+    debug_pixels = [(200, 378), (428, 1160)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=5, debug_pixels=debug_pixels)

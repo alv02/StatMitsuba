@@ -1,6 +1,6 @@
 <scene version="3.0.0">
 	<default name="integrator" value="path" />
-	<default name="spp" value="255" />
+	<default name="spp" value="256" />
 	<default name="resy" value="1280" />
 	<default name="resx" value="720" />
 	<default name="max_depth" value="65" />
@@ -25,7 +25,7 @@
 			<integer name="height" value="$resy" />
 			<string name="file_format" value="openexr" />
 			<string name="pixel_format" value="rgb" />
-			<rfilter type="tent" />
+			<rfilter type="box" />
 		</film>
 	</sensor>
 	<bsdf type="twosided" id="WoodFloorBSDF">
