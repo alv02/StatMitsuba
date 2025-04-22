@@ -16,6 +16,34 @@ from scipy import stats
 from torch import nn
 
 
+class Tile(nn.Module):
+    """
+    Creates a tiled tensor for and image
+    """
+
+    def __init__(self, radius):
+        super().__init__()
+        self.radius = radius
+        self.pad = radius * 2
+        self.final_tile_size = 256
+        self.tile_size = self.final_tile_size + 2 * radius
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        x_padded = F.pad(x, (self.pad, self.pad, self.pad, self.pad))
+
+        tiles = F.unfold(
+            x_padded,
+            kernel_size=(self.tile_size),
+            stride=self.final_tile_size,
+        )
+        tiles = tiles.view(1, C, self.tile_size, self.tile_size, -1)
+        tiles = tiles.permute(0, 4, 1, 2, 3)
+        tiles = tiles.reshape(-1, C, self.tile_size, self.tile_size)
+        print(tiles.shape)
+        return tiles
+
+
 class Shift(nn.Module):
     """
     Creates a tensor with the neighbours of each pixel
@@ -27,15 +55,21 @@ class Shift(nn.Module):
         self.kernel_size = 2 * radius + 1
         self.n_patches = self.kernel_size**2
 
-    def forward(self, x):
+    def forward(self, x, pad=None):
         """
         x (B, C, H, W)
         returns (B, C*n_patches, H, W)
         """
+        if pad == None:
+            pad = self.radius
         B, C, H, W = x.shape
-        # Extract patches using unfold (similar to what you already had)
-        patches = F.unfold(x, kernel_size=self.kernel_size, padding=self.radius)
-        patches = patches.view(1, C * self.n_patches, H, W)
+        patches = F.unfold(x, kernel_size=self.kernel_size, padding=pad)
+        patches = patches.view(
+            1,
+            C * self.n_patches,
+            H + (pad * 2 - self.radius * 2),
+            W + (pad * 2 - self.radius * 2),
+        )
         return patches
 
 
@@ -67,6 +101,7 @@ class StatDenoiser(nn.Module):
 
         # Create shift operator
         self.shift = Shift(radius)
+        self.tile = Tile(radius)
 
     def debug(self, weights_jbf, membership, final_weights):
         _, _, _, H, W = membership.shape
@@ -232,6 +267,10 @@ class StatDenoiser(nn.Module):
 
     def forward(self, image, guidance, estimands, estimands_variance, spp):
         # Shapes (B, 1, n_patches, H, W)
+        tile = self.tile(guidance)
+        first_tile = tile[0, :, :, :].unsqueeze(0)
+        first_tile_patches = self.shift(first_tile, 0)
+        print(first_tile_patches.shape)
         bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(1)
         membership = self.compute_membership(estimands, estimands_variance, spp)
         final_weights = bilateral_weights * membership
@@ -255,7 +294,7 @@ if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    scene = "./volumetric"
+    scene = "./staircase"
 
     # Load the EXR file
     bitmap = mi.Bitmap(scene + ".exr")
