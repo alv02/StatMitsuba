@@ -30,7 +30,7 @@ class Shift(nn.Module):
     def forward(self, x):
         """
         x (B, C, H, W)
-        returns (B, C*K**2, H, W)
+        returns (B, C*n_patches, H, W)
         """
         B, C, H, W = x.shape
         # Extract patches using unfold (similar to what you already had)
