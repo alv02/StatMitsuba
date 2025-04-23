@@ -24,19 +24,20 @@ class Tile(nn.Module):
     def __init__(self, radius):
         super().__init__()
         self.radius = radius
-        self.pad = radius * 2
         self.final_tile_size = 256
         self.tile_size = self.final_tile_size + 2 * radius
+        self.stride = self.final_tile_size - radius  # TODO: Comprobar que esta bien
 
     def forward(self, x):
+        """
+        Returns tensor (tiles, C, H, W)
+        """
         B, C, H, W = x.shape
-        x_padded = F.pad(x, (self.pad, self.pad, self.pad, self.pad))
-
-        tiles = F.unfold(
-            x_padded,
-            kernel_size=(self.tile_size),
-            stride=self.final_tile_size,
+        x_padded = F.pad(
+            x, (self.radius, self.tile_size // 2, self.radius, self.tile_size // 2)
         )
+
+        tiles = F.unfold(x_padded, kernel_size=(self.tile_size), stride=self.stride)
         tiles = tiles.view(1, C, self.tile_size, self.tile_size, -1)
         tiles = tiles.permute(0, 4, 1, 2, 3)
         tiles = tiles.reshape(-1, C, self.tile_size, self.tile_size)
@@ -55,20 +56,15 @@ class Shift(nn.Module):
         self.kernel_size = 2 * radius + 1
         self.n_patches = self.kernel_size**2
 
-    def forward(self, x, pad=None):
+    def forward(self, x):
         """
         x (B, C, H, W)
         returns (B, C*n_patches, H, W)
         """
-        if pad == None:
-            pad = self.radius
         B, C, H, W = x.shape
-        patches = F.unfold(x, kernel_size=self.kernel_size, padding=pad)
+        patches = F.unfold(x, kernel_size=self.kernel_size)
         patches = patches.view(
-            1,
-            C * self.n_patches,
-            H + (pad * 2 - self.radius * 2),
-            W + (pad * 2 - self.radius * 2),
+            1, C * self.n_patches, H - self.radius * 2, W - self.radius * 2
         )
         return patches
 
@@ -102,6 +98,7 @@ class StatDenoiser(nn.Module):
         # Create shift operator
         self.shift = Shift(radius)
         self.tile = Tile(radius)
+        self.tile2 = Tile(0)
 
     def debug(self, weights_jbf, membership, final_weights):
         _, _, _, H, W = membership.shape
@@ -215,7 +212,9 @@ class StatDenoiser(nn.Module):
     def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
         n, c, h, w = guidance.size()
-        shifted_guidance = shifted_guidance.view(n, c, self.n_patches, h, w)
+        shifted_guidance = shifted_guidance.view(
+            n, c, self.n_patches, self.tile.final_tile_size, self.tile.final_tile_size
+        )
 
         # Get center guidance
         center_idx = self.n_patches // 2
@@ -241,12 +240,18 @@ class StatDenoiser(nn.Module):
         gamma_w = self.compute_gamma_w(spp, spp, self.alpha).to(estimands.device)
         center_idx = self.n_patches // 2
 
-        shifted_estimands = self.shift(estimands)
-        shifted_estimands_variance = self.shift(estimands_variance)
-        b, c, h, w = estimands.size()
-        shifted_estimands = shifted_estimands.view(b, c, self.n_patches, h, w)
+        estimands_padded = F.pad(
+            estimands, (self.radius, self.radius, self.radius, self.radius)
+        )
+        estimands_variance_padded = F.pad(
+            estimands_variance, (self.radius, self.radius, self.radius, self.radius)
+        )
+        shifted_estimands = self.shift(estimands_padded)
+        shifted_estimands_variance = self.shift(estimands_variance_padded)
+        b, _, h, w = shifted_estimands.shape
+        shifted_estimands = shifted_estimands.view(b, -1, self.n_patches, h, w)
         shifted_estimands_variance = shifted_estimands_variance.view(
-            b, c, self.n_patches, h, w
+            b, -1, self.n_patches, h, w
         )
 
         center_estimands = estimands.unsqueeze(2)
@@ -266,27 +271,39 @@ class StatDenoiser(nn.Module):
         return membership
 
     def forward(self, image, guidance, estimands, estimands_variance, spp):
-        # Shapes (B, 1, n_patches, H, W)
-        tile = self.tile(guidance)
-        first_tile = tile[0, :, :, :].unsqueeze(0)
-        first_tile_patches = self.shift(first_tile, 0)
-        print(first_tile_patches.shape)
-        bilateral_weights = self.compute_bilateral_weights(guidance).unsqueeze(1)
-        membership = self.compute_membership(estimands, estimands_variance, spp)
-        final_weights = bilateral_weights * membership
+        # Tile inputs
+        tiled_image = self.tile(image)
+        tiled_guidance = self.tile(guidance)
+        tiled_estimands = self.tile2(estimands)
+        tiled_estimands_variance = self.tile2(estimands_variance)
 
-        shifted_image = self.shift(image)
-        n, c_img, h, w = image.size()
-        shifted_image = shifted_image.view(n, c_img, self.n_patches, h, w)
+        # Procesamiento por tile
+        batch_tiles = tiled_image.shape[0]
 
-        sum_weights = torch.sum(final_weights, dim=2)
-        sum_weights = torch.clamp(sum_weights, min=1e-10)
-        final_weights = final_weights / sum_weights
-        weighted_values = shifted_image * final_weights
-        denoised_image = torch.sum(weighted_values, dim=2)
+        for i in range(batch_tiles):
+            img_tile = tiled_image[i : i + 1]
+            guidance_tile = tiled_guidance[i : i + 1]
+            estimands_tile = tiled_estimands[i : i + 1]
+            var_tile = tiled_estimands_variance[i : i + 1]
 
-        if self.debug_pixels:
-            self.debug(bilateral_weights, membership, final_weights)
+            # Calcular pesos
+            weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(1)
+            membership = self.compute_membership(estimands_tile, var_tile, spp)
+            final_weights = weights_jbf * membership
+
+            # Obtener vecindario de píxeles de la imagen
+            shifted_image = self.shift(img_tile)
+            b, c, h, w = img_tile.shape
+            shifted_image = shifted_image.view(
+                b, c, self.n_patches, h - 2 * self.radius, w - 2 * self.radius
+            )
+
+            sum_weights = torch.sum(final_weights, dim=2)
+            sum_weights = torch.clamp(sum_weights, min=1e-10)
+            final_weights = final_weights / sum_weights
+            weighted_values = shifted_image * final_weights
+            denoised_image = torch.sum(weighted_values, dim=2)
+
         return denoised_image
 
 
@@ -339,7 +356,6 @@ if __name__ == "__main__":
     # Concatenate guidance features
     guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
 
-    # Check for CUDA availability
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -363,9 +379,7 @@ if __name__ == "__main__":
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
-    # Convert result back to CPU and numpy
     result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
 
-    # Save result as EXR
     result_bitmap = mi.Bitmap(result_np)
     result_bitmap.write("denoised_image_v.exr")
