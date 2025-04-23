@@ -98,7 +98,6 @@ class StatDenoiser(nn.Module):
         # Create shift operator
         self.shift = Shift(radius)
         self.tile = Tile(radius)
-        self.tile2 = Tile(0)
 
     def debug(self, weights_jbf, membership, final_weights):
         _, _, _, H, W = membership.shape
@@ -240,22 +239,20 @@ class StatDenoiser(nn.Module):
         gamma_w = self.compute_gamma_w(spp, spp, self.alpha).to(estimands.device)
         center_idx = self.n_patches // 2
 
-        estimands_padded = F.pad(
-            estimands, (self.radius, self.radius, self.radius, self.radius)
-        )
-        estimands_variance_padded = F.pad(
-            estimands_variance, (self.radius, self.radius, self.radius, self.radius)
-        )
-        shifted_estimands = self.shift(estimands_padded)
-        shifted_estimands_variance = self.shift(estimands_variance_padded)
+        shifted_estimands = self.shift(estimands)
+        shifted_estimands_variance = self.shift(estimands_variance)
         b, _, h, w = shifted_estimands.shape
         shifted_estimands = shifted_estimands.view(b, -1, self.n_patches, h, w)
         shifted_estimands_variance = shifted_estimands_variance.view(
             b, -1, self.n_patches, h, w
         )
 
-        center_estimands = estimands.unsqueeze(2)
-        center_estimands_variance = estimands_variance.unsqueeze(2)
+        center_estimands = estimands[
+            :, :, self.radius : -self.radius, self.radius : -self.radius
+        ].unsqueeze(2)
+        center_estimands_variance = estimands_variance[
+            :, :, self.radius : -self.radius, self.radius : -self.radius
+        ].unsqueeze(2)
 
         w_ij = self.compute_w(
             center_estimands,
@@ -274,8 +271,8 @@ class StatDenoiser(nn.Module):
         # Tile inputs
         tiled_image = self.tile(image)
         tiled_guidance = self.tile(guidance)
-        tiled_estimands = self.tile2(estimands)
-        tiled_estimands_variance = self.tile2(estimands_variance)
+        tiled_estimands = self.tile(estimands)
+        tiled_estimands_variance = self.tile(estimands_variance)
 
         # Procesamiento por tile
         batch_tiles = tiled_image.shape[0]
