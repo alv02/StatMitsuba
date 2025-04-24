@@ -182,6 +182,7 @@ cython_debug/
 *.jpg
 
 *.npy
+./StatisticalMitsuba/warnings.txt
 
 # ENV
 .tfg
