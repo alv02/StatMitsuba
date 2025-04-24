@@ -7,6 +7,8 @@ import time
 import matplotlib
 
 matplotlib.use("Agg")
+import math
+
 import matplotlib.pyplot as plt
 import mitsuba as mi
 import numpy as np
@@ -26,7 +28,7 @@ class Tile(nn.Module):
         self.radius = radius
         self.final_tile_size = 256
         self.tile_size = self.final_tile_size + 2 * radius
-        self.stride = self.final_tile_size - radius  # TODO: Comprobar que esta bien
+        self.stride = self.final_tile_size
 
     def forward(self, x):
         """
@@ -275,7 +277,10 @@ class StatDenoiser(nn.Module):
         tiled_estimands_variance = self.tile(estimands_variance)
 
         # Procesamiento por tile
-        batch_tiles = tiled_image.shape[0]
+        batch_tiles, C, _, _ = tiled_image.shape
+        tiled_denoised_image = torch.empty(
+            (batch_tiles, C, self.tile.final_tile_size, self.tile.final_tile_size)
+        )
 
         for i in range(batch_tiles):
             img_tile = tiled_image[i : i + 1]
@@ -300,6 +305,24 @@ class StatDenoiser(nn.Module):
             final_weights = final_weights / sum_weights
             weighted_values = shifted_image * final_weights
             denoised_image = torch.sum(weighted_values, dim=2)
+            tiled_denoised_image[i : i + 1] = denoised_image[0]
+
+        # Tiled denoised image (tiles, C, height, width) fold necesita (b, C*height_width, tiles)
+        tiled_denoised_image = (
+            tiled_denoised_image.permute(1, 2, 3, 0)
+            .reshape((C * self.tile.final_tile_size**2, batch_tiles))
+            .unsqueeze(0)
+        )
+
+        _, _, H, W = image.shape
+        H_OUT = math.ceil(H / self.tile.final_tile_size) * self.tile.final_tile_size
+        W_OUT = math.ceil(W / self.tile.final_tile_size) * self.tile.final_tile_size
+        denoised_image = F.fold(
+            tiled_denoised_image,
+            (H_OUT, W_OUT),
+            kernel_size=self.tile.final_tile_size,
+            stride=self.tile.final_tile_size,
+        )
 
         return denoised_image
 
@@ -377,6 +400,6 @@ if __name__ == "__main__":
     print(f"Filtering time: {elapsed:.4f} seconds")
 
     result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
-
+    result_np = result_np[0:h, 0:w, :]
     result_bitmap = mi.Bitmap(result_np)
     result_bitmap.write("denoised_image_v.exr")

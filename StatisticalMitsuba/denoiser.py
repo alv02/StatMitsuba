@@ -167,7 +167,7 @@ def denoiser(
 
 if __name__ == "__main__":
     mi.set_variant("llvm_ad_rgb")
-    statistics = np.load("./stats_staircase.npy")
+    statistics = np.load("./staircase_stats.npy")
     # albedo:ch7-9 normales:ch10-12
     bitmap = mi.Bitmap("./staircase.exr")
     res = dict(bitmap.split())
