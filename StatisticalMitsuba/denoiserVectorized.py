@@ -36,14 +36,19 @@ class Tile(nn.Module):
         """
         B, C, H, W = x.shape
         x_padded = F.pad(
-            x, (self.radius, self.tile_size // 2, self.radius, self.tile_size // 2)
+            x,
+            (
+                self.radius,
+                self.final_tile_size - 1 + self.radius,
+                self.radius,
+                self.final_tile_size - 1 + self.radius,
+            ),
         )
 
         tiles = F.unfold(x_padded, kernel_size=(self.tile_size), stride=self.stride)
         tiles = tiles.view(1, C, self.tile_size, self.tile_size, -1)
         tiles = tiles.permute(0, 4, 1, 2, 3)
         tiles = tiles.reshape(-1, C, self.tile_size, self.tile_size)
-        print(tiles.shape)
         return tiles
 
 
