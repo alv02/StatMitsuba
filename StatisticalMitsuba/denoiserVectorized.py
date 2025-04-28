@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Joint Bilateral Filter with Membership Functions in PyTorch (Simplified)
 
 import os
@@ -82,6 +81,22 @@ class StatDenoiser(nn.Module):
     and statistical tests to determine which pixels should be combined.
     """
 
+    def get_debug_pixels_tiled(self, debug_pixels, W):
+        tiled_debug_pixels = []
+        tiles_per_row = math.ceil(W / self.tile.final_tile_size)
+
+        for pixel_x, pixel_y in debug_pixels:
+            tile_x = pixel_x // self.tile.final_tile_size
+            tile_y = pixel_y // self.tile.final_tile_size
+            tile_linear_index = tile_y * tiles_per_row + tile_x
+
+            offset_x = pixel_x % self.tile.final_tile_size
+            offset_y = pixel_y % self.tile.final_tile_size
+
+            tiled_debug_pixels.append((tile_linear_index, offset_x, offset_y))
+
+        return tiled_debug_pixels
+
     def __init__(self, radius=5, alpha=0.005, debug_pixels=None):
         super(StatDenoiser, self).__init__()
 
@@ -91,7 +106,6 @@ class StatDenoiser(nn.Module):
         self.n_patches = self.kernel_size**2
 
         # Debug parameters
-        self.debug_pixels = debug_pixels  # List of (y, x) coordinates to debug
 
         # Sigma_inv(1, C*n_patches, 1, 1)
         self.sigma_inv = torch.tensor(
@@ -105,58 +119,60 @@ class StatDenoiser(nn.Module):
         # Create shift operator
         self.shift = Shift(radius)
         self.tile = Tile(radius)
+        self.debug_pixels = debug_pixels
 
-    def debug(self, weights_jbf, membership, final_weights):
-        _, _, _, H, W = membership.shape
-        if self.debug_pixels:
-            os.makedirs("debug_output", exist_ok=True)  # Crea la carpeta si no existe
-            for x, y in self.debug_pixels:
-                if 0 <= y < H and 0 <= x < W:
-                    # Extracción de los pesos JBF
-                    weights = (
-                        weights_jbf[0, 0, :, y, x]
-                        .cpu()
-                        .numpy()
-                        .reshape(self.kernel_size, self.kernel_size)
-                    )
-                    # Extracción de los pesos de membership
-                    mem = (
-                        membership[0, 0, :, y, x]
-                        .cpu()
-                        .numpy()
-                        .reshape(self.kernel_size, self.kernel_size)
-                    )
-                    # Extracción de los pesos finales
-                    final_w = (
-                        final_weights[0, 0, :, y, x]
-                        .cpu()
-                        .numpy()
-                        .reshape(self.kernel_size, self.kernel_size)
-                    )
+    def debug(self, weights_jbf, membership, final_weights, tile_index, W):
+        if self.debug_pixels == None:
+            return
+        debug_pixels_tiled = self.get_debug_pixels_tiled(self.debug_pixels, W)
+        for pixel_tile, offset_x, offset_y in debug_pixels_tiled:
+            if pixel_tile == tile_index:
+                weights = (
+                    weights_jbf[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
+                # Extracción de los pesos de membership
+                mem = (
+                    membership[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
+                # Extracción de los pesos finales
+                final_w = (
+                    final_weights[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
 
-                    # Creación de la figura para mostrar los tres mapas
-                    fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-                    fig.suptitle(f"Debug Pixel ({x}, {y})")
+                # Creación de la figura para mostrar los tres mapas
+                fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+                fig.suptitle(f"Debug Pixel ({offset_x}, {offset_y})")
 
-                    # Mostrar pesos JBF
-                    im0 = axs[0].imshow(weights, cmap="viridis")
-                    axs[0].set_title("Bilateral Weights")
-                    fig.colorbar(im0, ax=axs[0])
+                # Mostrar pesos JBF
+                im0 = axs[0].imshow(weights, cmap="viridis")
+                axs[0].set_title("Bilateral Weights")
+                fig.colorbar(im0, ax=axs[0])
 
-                    # Mostrar los valores de membership
-                    im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
-                    axs[1].set_title("Membership")
-                    fig.colorbar(im1, ax=axs[1])
+                # Mostrar los valores de membership
+                im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
+                axs[1].set_title("Membership")
+                fig.colorbar(im1, ax=axs[1])
 
-                    # Mostrar los pesos finales
-                    im2 = axs[2].imshow(final_w, cmap="viridis")
-                    axs[2].set_title("Final Weights")
-                    fig.colorbar(im2, ax=axs[2])
+                # Mostrar los pesos finales
+                im2 = axs[2].imshow(final_w, cmap="viridis")
+                axs[2].set_title("Final Weights")
+                fig.colorbar(im2, ax=axs[2])
 
-                    # Guarda la figura en un archivo
-                    fig_path = f"debug_output/pixel_{x}_{y}.png"
-                    plt.savefig(fig_path, dpi=300)
-                    plt.close(fig)  # Cierra la figura para liberar memoria
+                # Guarda la figura en un archivo
+                fig_path = (
+                    f"debug_output/tile_{pixel_tile}pixel_{offset_x}_{offset_y}.png"
+                )
+                plt.savefig(fig_path, dpi=300)
+                plt.close(fig)  # Cierra la figura para liberar memoria
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -217,7 +233,7 @@ class StatDenoiser(nn.Module):
 
     def compute_bilateral_weights(self, guidance):
         shifted_guidance = self.shift(guidance)
-        n, c, h, w = guidance.size()
+        n, c, _, _ = guidance.size()
         shifted_guidance = shifted_guidance.view(
             n, c, self.n_patches, self.tile.final_tile_size, self.tile.final_tile_size
         )
@@ -280,6 +296,7 @@ class StatDenoiser(nn.Module):
         tiled_guidance = self.tile(guidance)
         tiled_estimands = self.tile(estimands)
         tiled_estimands_variance = self.tile(estimands_variance)
+        _, _, H, W = image.shape
 
         # Procesamiento por tile
         batch_tiles, C, _, _ = tiled_image.shape
@@ -312,6 +329,8 @@ class StatDenoiser(nn.Module):
             denoised_image = torch.sum(weighted_values, dim=2)
             tiled_denoised_image[i : i + 1] = denoised_image[0]
 
+            self.debug(weights_jbf, membership, final_weights, i, W)
+
         # Tiled denoised image (tiles, C, height, width) fold necesita (b, C*height_width, tiles)
         tiled_denoised_image = (
             tiled_denoised_image.permute(1, 2, 3, 0)
@@ -319,7 +338,6 @@ class StatDenoiser(nn.Module):
             .unsqueeze(0)
         )
 
-        _, _, H, W = image.shape
         H_OUT = math.ceil(H / self.tile.final_tile_size) * self.tile.final_tile_size
         W_OUT = math.ceil(W / self.tile.final_tile_size) * self.tile.final_tile_size
         denoised_image = F.fold(
@@ -336,7 +354,7 @@ if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    scene = "./staircase"
+    scene = "./bathroom"
 
     # Load the EXR file
     bitmap = mi.Bitmap(scene + ".exr")
@@ -373,22 +391,25 @@ if __name__ == "__main__":
 
     # Generate position features
     h, w = albedo.shape[2], albedo.shape[3]
-    y_coords = torch.linspace(0, h - 1, h, dtype=torch.float32)
-    x_coords = torch.linspace(0, w - 1, w, dtype=torch.float32)
+
+    y_coords = torch.linspace(0, 1, h, dtype=torch.float32)
+    x_coords = torch.linspace(0, w / h, w, dtype=torch.float32)
     y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+
     pos = torch.stack([x_grid, y_grid], dim=0).unsqueeze(0)
 
     # Concatenate guidance features
     guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
+    print(guidance[0, :, 94, 55])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(200, 378), (428, 1160)]
+    debug_pixels = [(55, 94), (56, 107), (115, 91), (694, 1162)]
 
     # Initialize joint bilateral filter with membership
-    stat_denoiser = StatDenoiser(radius=5, debug_pixels=debug_pixels)
+    stat_denoiser = StatDenoiser(radius=20, debug_pixels=debug_pixels)
 
     # Move tensors and model to device
     stat_denoiser = stat_denoiser.to(device)

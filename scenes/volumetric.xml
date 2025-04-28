@@ -1,6 +1,6 @@
 <scene version="3.0.0">
 	<default name="integrator" value="volpath" />
-	<default name="spp" value="64" />
+	<default name="spp" value="256" />
 	<default name="resy" value="1024" />
   <default name="resx" value="1024" />
   <default name="max_depth" value="32"/>

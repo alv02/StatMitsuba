@@ -54,7 +54,7 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
 
-            np.save("stats.npy", combined_with_spp)
+            np.save("./bathroom_stats.npy", combined_with_spp)
             return combined_with_spp
 
     def should_stop(self) -> bool:
@@ -89,7 +89,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/volumetric.xml")
+scene = mi.load_file("../scenes/bathroom2/scene.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("./volumetric.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./bathroom.exr", sensor.film().bitmap())
