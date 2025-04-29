@@ -1,4 +1,5 @@
 import os
+import time
 
 import mitsuba as mi
 import numpy as np
@@ -185,6 +186,7 @@ if __name__ == "__main__":
 
     gamma_w = calculate_critical_value(spp, spp)
     sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
+    start_time = time.time()
     result = denoiser(
         image,
         albedo,
@@ -193,8 +195,10 @@ if __name__ == "__main__":
         estimands,
         estimands_variance,
         sigma,
-        radius=5,
+        radius=20,
     )
+    elapsed = time.time() - start_time
+    print(f"Filtering time: {elapsed:.4f} seconds")
 
     bitmap = mi.Bitmap(result)
 

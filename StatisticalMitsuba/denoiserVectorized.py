@@ -354,7 +354,7 @@ if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    scene = "./bathroom"
+    scene = "./staircase"
 
     # Load the EXR file
     bitmap = mi.Bitmap(scene + ".exr")
@@ -392,8 +392,8 @@ if __name__ == "__main__":
     # Generate position features
     h, w = albedo.shape[2], albedo.shape[3]
 
-    y_coords = torch.linspace(0, 1, h, dtype=torch.float32)
-    x_coords = torch.linspace(0, w / h, w, dtype=torch.float32)
+    y_coords = torch.linspace(-1, 1, h, dtype=torch.float32)
+    x_coords = torch.linspace(-w / h, w / h, w, dtype=torch.float32)
     y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
 
     pos = torch.stack([x_grid, y_grid], dim=0).unsqueeze(0)
