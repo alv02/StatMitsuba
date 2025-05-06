@@ -1,6 +1,4 @@
-# Joint Bilateral Filter with Membership Functions in PyTorch (Simplified)
-
-import os
+# Joint Bilateral Filter with Membership Functions in PyTorch
 import time
 
 import matplotlib

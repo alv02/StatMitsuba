@@ -2,3 +2,6 @@
 	path = external/mitsuba3
 	url = https://github.com/mitsuba-renderer/mitsuba3
 	branch = stable
+[submodule "external/statmitransient"]
+	path = external/statmitransient
+	url = https://github.com/alv02/statmitransient
