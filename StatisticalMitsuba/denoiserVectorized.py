@@ -106,14 +106,15 @@ class StatDenoiser(nn.Module):
         # Debug parameters
 
         # Sigma_inv(1, C*n_patches, 1, 1)
-        self.sigma_inv = torch.tensor(
+        sigma_inv = torch.tensor(
             [0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
         )
-        self.sigma_inv = self.sigma_inv.repeat(self.n_patches)
-        self.sigma_inv = self.sigma_inv.view(1, self.n_patches, -1, 1, 1)
-        self.sigma_inv = torch.permute(self.sigma_inv, (0, 2, 1, 3, 4))
-        self.sigma_inv = torch.reshape(self.sigma_inv, (1, -1, self.n_patches, 1, 1))
+        sigma_inv = sigma_inv.repeat(self.n_patches)
+        sigma_inv = sigma_inv.view(1, self.n_patches, -1, 1, 1)
+        sigma_inv = torch.permute(sigma_inv, (0, 2, 1, 3, 4))
+        sigma_inv = torch.reshape(sigma_inv, (1, -1, self.n_patches, 1, 1))
 
+        self.register_buffer("sigma_inv", sigma_inv)
         # Create shift operator
         self.shift = Shift(radius)
         self.tile = Tile(radius)
