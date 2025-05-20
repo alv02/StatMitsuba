@@ -89,7 +89,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/bathroom2/scene.xml")
+scene = mi.load_file("../scenes/cbox_diffuse.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("./bathroom.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./aovs-transient.exr", sensor.film().bitmap())

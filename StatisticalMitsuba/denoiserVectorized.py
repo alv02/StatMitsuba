@@ -359,7 +359,7 @@ if __name__ == "__main__":
     bitmap = mi.Bitmap(scene + ".exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load(scene + "_stats.npy")  # [C, H, W, 3]
+    statistics = np.load(scene + ".npy")  # [C, H, W, 3]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
