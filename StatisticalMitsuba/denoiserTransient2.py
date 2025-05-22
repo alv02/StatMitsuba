@@ -116,15 +116,20 @@ class StatDenoiser(nn.Module):
             offset_x = pixel_x % self.tile.final_tile_size
             offset_y = pixel_y % self.tile.final_tile_size
 
-            tiled_debug_pixels.append((tile_linear_index, offset_x, offset_y))
+            # También devolvemos la posición absoluta
+            tiled_debug_pixels.append(
+                (tile_linear_index, offset_x, offset_y, pixel_x, pixel_y)
+            )
 
         return tiled_debug_pixels
 
     def debug(self, weights_jbf, membership, final_weights, tile_index, W):
-        if self.debug_pixels == None:
+        if self.debug_pixels is None:
             return
+
         debug_pixels_tiled = self.get_debug_pixels_tiled(self.debug_pixels, W)
-        for pixel_tile, offset_x, offset_y in debug_pixels_tiled:
+
+        for pixel_tile, offset_x, offset_y, abs_x, abs_y in debug_pixels_tiled:
             if pixel_tile == tile_index:
                 weights = (
                     weights_jbf[0, 0, :, offset_y, offset_x]
@@ -132,14 +137,12 @@ class StatDenoiser(nn.Module):
                     .numpy()
                     .reshape(self.kernel_size, self.kernel_size)
                 )
-                # Extracción de los pesos de membership
                 mem = (
                     membership[0, 0, :, offset_y, offset_x]
                     .cpu()
                     .numpy()
                     .reshape(self.kernel_size, self.kernel_size)
                 )
-                # Extracción de los pesos finales
                 final_w = (
                     final_weights[0, 0, :, offset_y, offset_x]
                     .cpu()
@@ -147,31 +150,25 @@ class StatDenoiser(nn.Module):
                     .reshape(self.kernel_size, self.kernel_size)
                 )
 
-                # Creación de la figura para mostrar los tres mapas
                 fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-                fig.suptitle(f"Debug Pixel ({offset_x}, {offset_y})")
+                fig.suptitle(f"Debug Pixel (abs_x={abs_x}, abs_y={abs_y})")
 
-                # Mostrar pesos JBF
                 im0 = axs[0].imshow(weights, cmap="viridis")
                 axs[0].set_title("Bilateral Weights")
                 fig.colorbar(im0, ax=axs[0])
 
-                # Mostrar los valores de membership
                 im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
                 axs[1].set_title("Membership")
                 fig.colorbar(im1, ax=axs[1])
 
-                # Mostrar los pesos finales
                 im2 = axs[2].imshow(final_w, cmap="viridis")
                 axs[2].set_title("Final Weights")
                 fig.colorbar(im2, ax=axs[2])
 
-                # Guarda la figura en un archivo
-                fig_path = (
-                    f"debug_output/tile_{pixel_tile}pixel_{offset_x}_{offset_y}.png"
-                )
+                # Guardar usando coordenadas absolutas
+                fig_path = f"debug_output/pixel_{abs_x}_{abs_y}.png"
                 plt.savefig(fig_path, dpi=300)
-                plt.close(fig)  # Cierra la figura para liberar memoria
+                plt.close(fig)
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -401,7 +398,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = None
+    debug_pixels = [(57, 344)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
@@ -411,29 +408,37 @@ if __name__ == "__main__":
     final_result = torch.zeros_like(images)
     batches, _, _, _ = images.shape
     start_time = time.time()
-    for i in range(batches):
-        image_per_batch = images[i, ...].unsqueeze(0)
-        estimands_per_batch = estimands[i, ...].unsqueeze(0)
-        estimands_variance_per_batch = estimands_variance[i, ...].unsqueeze(0)
-        stat_denoiser = stat_denoiser.to(device)
-        image_per_batch = image_per_batch.to(device)
-        guidance = guidance.to(device)
-        estimands_per_batch = estimands_per_batch.to(device)
-        estimands_variance_per_batch = estimands_variance_per_batch.to(device)
+    i = 50
+    image_per_batch = images[i, ...].unsqueeze(0)
+    estimands_per_batch = estimands[i, ...].unsqueeze(0)
+    estimands_variance_per_batch = estimands_variance[i, ...].unsqueeze(0)
+    stat_denoiser = stat_denoiser.to(device)
+    image_per_batch = image_per_batch.to(device)
+    guidance = guidance.to(device)
+    estimands_per_batch = estimands_per_batch.to(device)
+    estimands_variance_per_batch = estimands_variance_per_batch.to(device)
 
-        # Time the filtering operation
-        with torch.no_grad():
-            result = stat_denoiser(
-                image_per_batch,
-                guidance,
-                estimands_per_batch,
-                estimands_variance_per_batch,
-                spp,
-            )
-        final_result[i, ...] = result[..., 0:h, 0:w]
+    # Time the filtering operation
+    with torch.no_grad():
+        result = stat_denoiser(
+            image_per_batch,
+            guidance,
+            estimands_per_batch,
+            estimands_variance_per_batch,
+            spp,
+        )
+    final_result[i, ...] = result[..., 0:h, 0:w]
 
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
     final_result_np = final_result.permute(2, 3, 0, 1).cpu().numpy().astype(np.float32)
     np.save("denoised_transient.npy", final_result_np)
+
+    result_bitmap = mi.Bitmap(final_result_np[:, :, i, ...])
+    original_np = (
+        images[i, ...].squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
+    )
+    original_bitmap = mi.Bitmap(original_np)
+    result_bitmap.write("denoised_transient_image.exr")
+    original_bitmap.write("original_transient.exr")
