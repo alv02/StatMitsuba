@@ -1,205 +1,430 @@
-import os
+# Joint Bilateral Filter with Membership Functions in PyTorch
 import time
 
+import matplotlib
+
+matplotlib.use("Agg")
+import math
+
+import matplotlib.pyplot as plt
 import mitsuba as mi
 import numpy as np
-import scipy.stats as stats
-from numba import njit, prange
+import torch
+import torch.nn.functional as F
+from scipy import stats
+from torch import nn
 
 
-@njit
-def evaluate_base_filter(prior_i, prior_j, sigma_inv):
-    # Compute the difference (p_j - p_i)
-    diff = prior_j - prior_i
+class Tile(nn.Module):
+    """
+    Creates a tiled tensor for and image
+    """
 
-    # Calculate the weight using the Gaussian falloff formula
-    weight = np.exp(-0.5 * (diff.T @ sigma_inv @ diff))
+    def __init__(self, radius):
+        super().__init__()
+        self.radius = radius
+        self.final_tile_size = 256
+        self.tile_size = self.final_tile_size + 2 * radius
+        self.stride = self.final_tile_size
 
-    return weight
+    def forward(self, x):
+        """
+        Returns tensor (tiles, C, H, W)
+        """
+        B, C, H, W = x.shape
+        x_padded = F.pad(
+            x,
+            (
+                self.radius,
+                self.final_tile_size - 1 + self.radius,
+                self.radius,
+                self.final_tile_size - 1 + self.radius,
+            ),
+        )
 
-
-def calculate_critical_value(n_i, n_j, alpha=0.005):
-    # Calcula los grados de libertad
-    degrees_of_freedom = n_i + n_j - 2
-
-    # Calcula el valor crítico de la distribución t
-    gamma_w = stats.t.ppf(1 - alpha / 2, degrees_of_freedom)
-
-    return gamma_w
-
-
-@njit
-def compute_w(estimand_i, estimand_j, estimand_i_variance, estimand_j_variance):
-    numerator = (
-        2 * (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
-    )
-    denominator = 2 * (
-        (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
-    )
-
-    # Evitar división por 0 pero mantener los casos donde ambos sean 0
-    denominator_safe = np.where(denominator == 0, 1, denominator)
-
-    result = numerator / denominator_safe
-
-    result = np.where((numerator == 0) & (denominator == 0), 0.5, result)
-
-    variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
-    values_differ = estimand_i != estimand_j
-    result = np.where(variance_zero & values_differ, np.full_like(numerator, 1), result)
-    return result
+        tiles = F.unfold(x_padded, kernel_size=(self.tile_size), stride=self.stride)
+        tiles = tiles.view(1, C, self.tile_size, self.tile_size, -1)
+        tiles = tiles.permute(0, 4, 1, 2, 3)
+        tiles = tiles.reshape(-1, C, self.tile_size, self.tile_size)
+        return tiles
 
 
-@njit
-def compute_t_statistic(w_ij):
-    """Calcula el estadístico t para comparar píxeles en el filtro."""
-    return np.where(
-        w_ij == 1,
-        float("inf"),  # Si w_ij es 1, devuelve infinito
-        np.sqrt((1 / (2 * (1 - w_ij))) - 1),
-    )
+class Shift(nn.Module):
+    """
+    Creates a tensor with the neighbours of each pixel
+    """
+
+    def __init__(self, radius):
+        super().__init__()
+        self.radius = radius
+        self.kernel_size = 2 * radius + 1
+        self.n_patches = self.kernel_size**2
+
+    def forward(self, x):
+        """
+        x (B, C, H, W)
+        returns (B, C*n_patches, H, W)
+        """
+        B, C, H, W = x.shape
+        patches = F.unfold(x, kernel_size=self.kernel_size)
+        patches = patches.view(
+            1, C * self.n_patches, H - self.radius * 2, W - self.radius * 2
+        )
+        return patches
 
 
-@njit(parallel=True)
-def denoiser(
-    image,
-    albedo,
-    normals,
-    gamma_w,
-    estimands,
-    estimands_variance,
-    sigma,
-    radius=5,
-):
-    height, width, channels = np.shape(image)
+class StatDenoiser(nn.Module):
+    """
+    Joint Bilateral Filter with Membership Functions uses guidance image to calculate weights
+    and statistical tests to determine which pixels should be combined.
+    """
 
-    denoised_image = np.zeros_like(image)
+    def get_debug_pixels_tiled(self, debug_pixels, W):
+        tiled_debug_pixels = []
+        tiles_per_row = math.ceil(W / self.tile.final_tile_size)
 
-    sigma_inv = np.linalg.inv(sigma)
+        for pixel_x, pixel_y in debug_pixels:
+            tile_x = pixel_x // self.tile.final_tile_size
+            tile_y = pixel_y // self.tile.final_tile_size
+            tile_linear_index = tile_y * tiles_per_row + tile_x
 
-    # Pyxel i
-    for i in prange(height):
-        for j in range(width):
-            kernel = np.zeros((radius * 2 + 1, radius * 2 + 1))
-            memebership_function = np.zeros((radius * 2 + 1, radius * 2 + 1))
-            weight_optimal = np.zeros((radius * 2 + 1, radius * 2 + 1, channels))
-            t_statistical = np.zeros((radius * 2 + 1, radius * 2 + 1, channels))
+            offset_x = pixel_x % self.tile.final_tile_size
+            offset_y = pixel_y % self.tile.final_tile_size
 
-            prior_i = np.array(
-                [
-                    j,
-                    i,  # coordenadas (x, y)
-                    albedo[i, j, 0],
-                    albedo[i, j, 1],
-                    albedo[i, j, 2],  # r, g, b
-                    normals[i, j, 0],
-                    normals[i, j, 1],
-                    normals[i, j, 2],  # nx, ny, nz
-                ]
+            tiled_debug_pixels.append((tile_linear_index, offset_x, offset_y))
+
+        return tiled_debug_pixels
+
+    def __init__(self, radius=5, alpha=0.005, debug_pixels=None):
+        super(StatDenoiser, self).__init__()
+
+        self.radius = radius
+        self.kernel_size = 2 * radius + 1
+        self.alpha = alpha
+        self.n_patches = self.kernel_size**2
+
+        # Debug parameters
+
+        # Sigma_inv(1, C*n_patches, 1, 1)
+        sigma_inv = torch.tensor(
+            [0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
+        )
+        sigma_inv = sigma_inv.repeat(self.n_patches)
+        sigma_inv = sigma_inv.view(1, self.n_patches, -1, 1, 1)
+        sigma_inv = torch.permute(sigma_inv, (0, 2, 1, 3, 4))
+        sigma_inv = torch.reshape(sigma_inv, (1, -1, self.n_patches, 1, 1))
+
+        self.register_buffer("sigma_inv", sigma_inv)
+        # Create shift operator
+        self.shift = Shift(radius)
+        self.tile = Tile(radius)
+        self.debug_pixels = debug_pixels
+
+    def debug(self, weights_jbf, membership, final_weights, tile_index, W):
+        if self.debug_pixels == None:
+            return
+        debug_pixels_tiled = self.get_debug_pixels_tiled(self.debug_pixels, W)
+        for pixel_tile, offset_x, offset_y in debug_pixels_tiled:
+            if pixel_tile == tile_index:
+                weights = (
+                    weights_jbf[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
+                # Extracción de los pesos de membership
+                mem = (
+                    membership[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
+                # Extracción de los pesos finales
+                final_w = (
+                    final_weights[0, 0, :, offset_y, offset_x]
+                    .cpu()
+                    .numpy()
+                    .reshape(self.kernel_size, self.kernel_size)
+                )
+
+                # Creación de la figura para mostrar los tres mapas
+                fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+                fig.suptitle(f"Debug Pixel ({offset_x}, {offset_y})")
+
+                # Mostrar pesos JBF
+                im0 = axs[0].imshow(weights, cmap="viridis")
+                axs[0].set_title("Bilateral Weights")
+                fig.colorbar(im0, ax=axs[0])
+
+                # Mostrar los valores de membership
+                im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
+                axs[1].set_title("Membership")
+                fig.colorbar(im1, ax=axs[1])
+
+                # Mostrar los pesos finales
+                im2 = axs[2].imshow(final_w, cmap="viridis")
+                axs[2].set_title("Final Weights")
+                fig.colorbar(im2, ax=axs[2])
+
+                # Guarda la figura en un archivo
+                fig_path = (
+                    f"debug_output/tile_{pixel_tile}pixel_{offset_x}_{offset_y}.png"
+                )
+                plt.savefig(fig_path, dpi=300)
+                plt.close(fig)  # Cierra la figura para liberar memoria
+
+    def compute_gamma_w(self, n_i, n_j, alpha=0.005):
+        """Calculate critical value using t-distribution."""
+        # Calculate degrees of freedom
+        degrees_of_freedom = n_i + n_j - 2
+
+        # Calculate critical value from t-distribution
+        gamma_w = stats.t.ppf(1 - alpha / 2, degrees_of_freedom)
+
+        return torch.tensor(gamma_w, dtype=torch.float32)
+
+    def compute_gamma(self, n_i, n_j, alpha=0.005):
+        gamma_w = self.compute_gamma_w(n_i, n_j, alpha)
+        return 1 / (2 * (gamma_w**2 + 1))
+
+    def compute_w(
+        self, estimand_i, estimand_j, estimand_i_variance, estimand_j_variance
+    ):
+        """Compute optimal weight w_ij between pixels i and j."""
+        numerator = (
+            2 * (estimand_i - estimand_j) ** 2
+            + estimand_i_variance
+            + estimand_j_variance
+        )
+        denominator = 2 * (
+            (estimand_i - estimand_j) ** 2 + estimand_i_variance + estimand_j_variance
+        )
+
+        # Avoid division by zero
+        denominator_safe = torch.where(denominator == 0, 1, denominator)
+
+        # Compute result
+        result = numerator / denominator_safe
+
+        # Handle special case where both numerator and denominator are 0
+
+        result = torch.where(
+            (numerator == 0) & (denominator == 0),
+            torch.full_like(numerator, 0.5),
+            numerator / denominator,
+        )
+
+        variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
+        values_differ = estimand_i != estimand_j
+        result = torch.where(
+            variance_zero & values_differ, torch.full_like(numerator, 1), result
+        )
+
+        return result
+
+    def compute_t_statistic(self, w_ij):
+        """Calculate t-statistic for comparing pixels."""
+        return torch.where(
+            w_ij == 1,
+            float("inf"),  # Si w_ij es 1, devuelve infinito
+            torch.sqrt((1 / (2 * (1 - w_ij))) - 1),
+        )
+
+    def compute_bilateral_weights(self, guidance):
+        shifted_guidance = self.shift(guidance)
+        n, c, _, _ = guidance.size()
+        shifted_guidance = shifted_guidance.view(
+            n, c, self.n_patches, self.tile.final_tile_size, self.tile.final_tile_size
+        )
+
+        # Get center guidance
+        center_idx = self.n_patches // 2
+        center_guidance = shifted_guidance[:, :, center_idx : center_idx + 1, :, :]
+
+        diff = shifted_guidance - center_guidance
+
+        diff_squared = diff**2
+
+        # Apply weights (in-place operation)
+        weighted_diff = diff_squared * self.sigma_inv
+
+        result = weighted_diff.sum(dim=1)
+
+        # Exponential (in-place)
+        bilateral_weights = torch.exp_(
+            -0.5 * result
+        )  # Use exp_ for in-place if available
+
+        return bilateral_weights
+
+    def compute_membership(self, estimands, estimands_variance, spp):
+        gamma_w = self.compute_gamma_w(spp, spp, self.alpha).to(estimands.device)
+        center_idx = self.n_patches // 2
+
+        shifted_estimands = self.shift(estimands)
+        shifted_estimands_variance = self.shift(estimands_variance)
+        b, _, h, w = shifted_estimands.shape
+        shifted_estimands = shifted_estimands.view(b, -1, self.n_patches, h, w)
+        shifted_estimands_variance = shifted_estimands_variance.view(
+            b, -1, self.n_patches, h, w
+        )
+
+        center_estimands = estimands[
+            :, :, self.radius : -self.radius, self.radius : -self.radius
+        ].unsqueeze(2)
+        center_estimands_variance = estimands_variance[
+            :, :, self.radius : -self.radius, self.radius : -self.radius
+        ].unsqueeze(2)
+
+        w_ij = self.compute_w(
+            center_estimands,
+            shifted_estimands,
+            center_estimands_variance,
+            shifted_estimands_variance,
+        )
+        t_stat = self.compute_t_statistic(w_ij)
+
+        membership = (t_stat < gamma_w).all(dim=1, keepdim=True).float()
+        membership[:, :, center_idx : center_idx + 1, :, :] = 1.0
+
+        return membership
+
+    def forward(self, image, guidance, estimands, estimands_variance, spp):
+        # Tile inputs
+        tiled_image = self.tile(image)
+        tiled_guidance = self.tile(guidance)
+        tiled_estimands = self.tile(estimands)
+        tiled_estimands_variance = self.tile(estimands_variance)
+        _, _, H, W = image.shape
+
+        # Procesamiento por tile
+        batch_tiles, C, _, _ = tiled_image.shape
+        tiled_denoised_image = torch.empty(
+            (batch_tiles, C, self.tile.final_tile_size, self.tile.final_tile_size)
+        )
+
+        for i in range(batch_tiles):
+            img_tile = tiled_image[i : i + 1]
+            guidance_tile = tiled_guidance[i : i + 1]
+            estimands_tile = tiled_estimands[i : i + 1]
+            var_tile = tiled_estimands_variance[i : i + 1]
+
+            # Calcular pesos
+            weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(1)
+            membership = self.compute_membership(estimands_tile, var_tile, spp)
+            final_weights = weights_jbf * membership
+
+            # Obtener vecindario de píxeles de la imagen
+            shifted_image = self.shift(img_tile)
+            b, c, h, w = img_tile.shape
+            shifted_image = shifted_image.view(
+                b, c, self.n_patches, h - 2 * self.radius, w - 2 * self.radius
             )
-            # Neighbour pyxels j
-            for di in range(-radius, radius + 1):
-                for dj in range(-radius, radius + 1):
-                    ni, nj = i + di, j + dj
-                    if ni == i and nj == j:
-                        kernel[di + radius, dj + radius] = 1
-                        memebership_function[di + radius, dj + radius] = 1
-                        continue
 
-                    if not (0 <= ni < height and 0 <= nj < width):
-                        continue
-                    prior_j = np.array(
-                        [
-                            nj,
-                            ni,  # coordinates (x, y) - switched i, j
-                            albedo[ni, nj, 0],
-                            albedo[ni, nj, 1],
-                            albedo[ni, nj, 2],  # r, g, b
-                            normals[ni, nj, 0],
-                            normals[ni, nj, 1],
-                            normals[ni, nj, 2],  # nx, ny, nz
-                        ]
-                    )
+            sum_weights = torch.sum(final_weights, dim=2)
+            sum_weights = torch.clamp(sum_weights, min=1e-10)
+            final_weights = final_weights / sum_weights
+            weighted_values = shifted_image * final_weights
+            denoised_image = torch.sum(weighted_values, dim=2)
+            tiled_denoised_image[i : i + 1] = denoised_image[0]
 
-                    kernel[di + radius, dj + radius] = evaluate_base_filter(
-                        prior_i, prior_j, sigma_inv
-                    )
+            self.debug(weights_jbf, membership, final_weights, i, W)
 
-                    estimand_i = estimands[i, j]
+        # Tiled denoised image (tiles, C, height, width) fold necesita (b, C*height_width, tiles)
+        tiled_denoised_image = (
+            tiled_denoised_image.permute(1, 2, 3, 0)
+            .reshape((C * self.tile.final_tile_size**2, batch_tiles))
+            .unsqueeze(0)
+        )
 
-                    estimand_j = estimands[ni, nj]
+        H_OUT = math.ceil(H / self.tile.final_tile_size) * self.tile.final_tile_size
+        W_OUT = math.ceil(W / self.tile.final_tile_size) * self.tile.final_tile_size
+        denoised_image = F.fold(
+            tiled_denoised_image,
+            (H_OUT, W_OUT),
+            kernel_size=self.tile.final_tile_size,
+            stride=self.tile.final_tile_size,
+        )
 
-                    estimand_i_variance = estimands_variance[i, j]
-                    estimand_j_variance = estimands_variance[ni, nj]
-
-                    wij = compute_w(
-                        estimand_i,
-                        estimand_j,
-                        estimand_i_variance,
-                        estimand_j_variance,
-                    )
-
-                    t = compute_t_statistic(wij)
-                    mij = int(np.all(t < gamma_w))
-                    kernel[di + radius, dj + radius] *= mij
-                    memebership_function[di + radius, dj + radius] = mij
-                    weight_optimal[di + radius, dj + radius] = wij
-                    t_statistical[di + radius, dj + radius] = t
-
-            sum_weights = np.sum(kernel[:, :])
-
-            if sum_weights != 0:
-                kernel[:, :] /= sum_weights
-
-            # Aplicar el kernel al pixel i
-            weighted_sum = np.zeros(channels)
-            for di in range(-radius, radius + 1):
-                for dj in range(-radius, radius + 1):
-                    ni, nj = i + di, j + dj
-                    if 0 <= ni < height and 0 <= nj < width:
-                        weighted_sum += (
-                            kernel[di + radius, dj + radius] * image[ni, nj, :]
-                        )
-
-            denoised_image[i, j, :] = weighted_sum
-
-    return denoised_image
+        return denoised_image
 
 
 if __name__ == "__main__":
+    # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
-    statistics = np.load("./staircase_stats.npy")
-    # albedo:ch7-9 normales:ch10-12
-    bitmap = mi.Bitmap("./staircase.exr")
-    res = dict(bitmap.split())
 
-    estimands = statistics[:, :, :, 0]
-    estimands_variance = statistics[:, :, :, 1]
-    estimands = np.transpose(estimands, (1, 2, 0))
-    estimands_variance = np.transpose(estimands_variance, (1, 2, 0))
+    scene = "./staircase"
+
+    # Load the EXR file
+    bitmap = mi.Bitmap(scene + ".exr")
+
+    # Load pre-computed statistics (already in channels-first format)
+    statistics = np.load(scene + ".npy")  # [C, H, W, 3]
+    estimands = (
+        torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
+    )  # [1, C, H, W]
+    estimands_variance = (
+        torch.from_numpy(statistics[:, :, :, 1]).to(torch.float32).unsqueeze(0)
+    )  # [1, C, H, W]
     spp = statistics[0, 0, 0, 2]
-    # Test a cada función por separado para comprobar que funcionan correctamente
-    res = dict(bitmap.split())
-    albedo = np.array(res["albedo"])
-    normals = np.array(res["nn"])
-    image = np.array(res["<root>"])
 
-    gamma_w = calculate_critical_value(spp, spp)
-    sigma = np.diag([10, 10, 0.02, 0.02, 0.02, 0.1, 0.1, 0.1])
-    start_time = time.time()
-    result = denoiser(
-        image,
-        albedo,
-        normals,
-        gamma_w,
-        estimands,
-        estimands_variance,
-        sigma,
-        radius=20,
+    # Extract channels from EXR
+    res = dict(bitmap.split())
+
+    # Convert to PyTorch tensors
+    image = (
+        torch.from_numpy(np.array(res["<root>"], dtype=np.float32))
+        .permute(2, 0, 1)
+        .unsqueeze(0)
     )
+    albedo = (
+        torch.from_numpy(np.array(res["albedo"], dtype=np.float32))
+        .permute(2, 0, 1)
+        .unsqueeze(0)
+    )
+    normals = (
+        torch.from_numpy(np.array(res["nn"], dtype=np.float32))
+        .permute(2, 0, 1)
+        .unsqueeze(0)
+    )
+
+    # Generate position features
+    h, w = albedo.shape[2], albedo.shape[3]
+
+    y_coords = torch.linspace(-1, 1, h, dtype=torch.float32)
+    x_coords = torch.linspace(-w / h, w / h, w, dtype=torch.float32)
+    y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+
+    pos = torch.stack([x_grid, y_grid], dim=0).unsqueeze(0)
+
+    # Concatenate guidance features
+    guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
+    print(guidance[0, :, 94, 55])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    # Define debug pixels - modify these to the coordinates you want to examine
+    debug_pixels = [(55, 94), (56, 107), (115, 91), (694, 1162)]
+
+    # Initialize joint bilateral filter with membership
+    stat_denoiser = StatDenoiser(radius=20, debug_pixels=debug_pixels)
+
+    # Move tensors and model to device
+    stat_denoiser = stat_denoiser.to(device)
+    image = image.to(device)
+    guidance = guidance.to(device)
+    estimands = estimands.to(device)
+    estimands_variance = estimands_variance.to(device)
+
+    # Time the filtering operation
+    start_time = time.time()
+    with torch.no_grad():
+        result = stat_denoiser(image, guidance, estimands, estimands_variance, spp)
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
-    bitmap = mi.Bitmap(result)
-
-    bitmap.write("denoised_image.exr")
+    result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
+    result_np = result_np[0:h, 0:w, :]
+    result_bitmap = mi.Bitmap(result_np)
+    result_bitmap.write("denoised_image_v.exr")

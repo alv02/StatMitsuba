@@ -404,7 +404,7 @@ if __name__ == "__main__":
     debug_pixels = None
 
     # Initialize joint bilateral filter with membership
-    stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
+    stat_denoiser = StatDenoiser(radius=5, alpha=0.005, debug_pixels=debug_pixels)
 
     # Move tensors and model to device
 

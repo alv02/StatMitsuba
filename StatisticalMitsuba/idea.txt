@@ -1,4 +1,0 @@
-Implementar StatisiticalFilm y StatisticalImageBlock
-StatisticalFilm: Equivalente al hdrfilm pero en create_block devuelve un StatisticalImageBlock
-StatisticalImageBloc: Equivalente a ImageBlock pero en la función put() o accum() recoger los samples y guardar las estadísticas
-Hay que ver estas estadísticas como guardarlas en un lugar que no se borren ya que imagino con los ImageBlock son temporales

@@ -363,7 +363,8 @@ if __name__ == "__main__":
     estimands_variance = (
         torch.from_numpy(statistics[..., 1]).to(torch.float32).permute(2, 3, 0, 1)
     )  # [1, C, H, W]
-    spp = statistics[0, 0, 0, 0, 2]
+    spp = 1024
+    print("Spp: ", spp)
     # Extract channels from EXR
     res = dict(bitmap.split())
 
@@ -398,7 +399,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(57, 344)]
+    debug_pixels = None
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
@@ -408,7 +409,7 @@ if __name__ == "__main__":
     final_result = torch.zeros_like(images)
     batches, _, _, _ = images.shape
     start_time = time.time()
-    i = 50
+    i = 0
     image_per_batch = images[i, ...].unsqueeze(0)
     estimands_per_batch = estimands[i, ...].unsqueeze(0)
     estimands_variance_per_batch = estimands_variance[i, ...].unsqueeze(0)
