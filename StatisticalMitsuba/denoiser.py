@@ -79,22 +79,6 @@ class StatDenoiser(nn.Module):
     and statistical tests to determine which pixels should be combined.
     """
 
-    def get_debug_pixels_tiled(self, debug_pixels, W):
-        tiled_debug_pixels = []
-        tiles_per_row = math.ceil(W / self.tile.final_tile_size)
-
-        for pixel_x, pixel_y in debug_pixels:
-            tile_x = pixel_x // self.tile.final_tile_size
-            tile_y = pixel_y // self.tile.final_tile_size
-            tile_linear_index = tile_y * tiles_per_row + tile_x
-
-            offset_x = pixel_x % self.tile.final_tile_size
-            offset_y = pixel_y % self.tile.final_tile_size
-
-            tiled_debug_pixels.append((tile_linear_index, offset_x, offset_y))
-
-        return tiled_debug_pixels
-
     def __init__(self, radius=5, alpha=0.005, debug_pixels=None):
         super(StatDenoiser, self).__init__()
 
@@ -120,11 +104,32 @@ class StatDenoiser(nn.Module):
         self.tile = Tile(radius)
         self.debug_pixels = debug_pixels
 
+    def get_debug_pixels_tiled(self, debug_pixels, W):
+        tiled_debug_pixels = []
+        tiles_per_row = math.ceil(W / self.tile.final_tile_size)
+
+        for pixel_x, pixel_y in debug_pixels:
+            tile_x = pixel_x // self.tile.final_tile_size
+            tile_y = pixel_y // self.tile.final_tile_size
+            tile_linear_index = tile_y * tiles_per_row + tile_x
+
+            offset_x = pixel_x % self.tile.final_tile_size
+            offset_y = pixel_y % self.tile.final_tile_size
+
+            # También devolvemos la posición absoluta
+            tiled_debug_pixels.append(
+                (tile_linear_index, offset_x, offset_y, pixel_x, pixel_y)
+            )
+
+        return tiled_debug_pixels
+
     def debug(self, weights_jbf, membership, final_weights, tile_index, W):
-        if self.debug_pixels == None:
+        if self.debug_pixels is None:
             return
+
         debug_pixels_tiled = self.get_debug_pixels_tiled(self.debug_pixels, W)
-        for pixel_tile, offset_x, offset_y in debug_pixels_tiled:
+
+        for pixel_tile, offset_x, offset_y, abs_x, abs_y in debug_pixels_tiled:
             if pixel_tile == tile_index:
                 weights = (
                     weights_jbf[0, 0, :, offset_y, offset_x]
@@ -132,14 +137,12 @@ class StatDenoiser(nn.Module):
                     .numpy()
                     .reshape(self.kernel_size, self.kernel_size)
                 )
-                # Extracción de los pesos de membership
                 mem = (
                     membership[0, 0, :, offset_y, offset_x]
                     .cpu()
                     .numpy()
                     .reshape(self.kernel_size, self.kernel_size)
                 )
-                # Extracción de los pesos finales
                 final_w = (
                     final_weights[0, 0, :, offset_y, offset_x]
                     .cpu()
@@ -147,31 +150,25 @@ class StatDenoiser(nn.Module):
                     .reshape(self.kernel_size, self.kernel_size)
                 )
 
-                # Creación de la figura para mostrar los tres mapas
                 fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-                fig.suptitle(f"Debug Pixel ({offset_x}, {offset_y})")
+                fig.suptitle(f"Debug Pixel (abs_x={abs_x}, abs_y={abs_y})")
 
-                # Mostrar pesos JBF
                 im0 = axs[0].imshow(weights, cmap="viridis")
                 axs[0].set_title("Bilateral Weights")
                 fig.colorbar(im0, ax=axs[0])
 
-                # Mostrar los valores de membership
                 im1 = axs[1].imshow(mem, cmap="gray", vmin=0, vmax=1)
                 axs[1].set_title("Membership")
                 fig.colorbar(im1, ax=axs[1])
 
-                # Mostrar los pesos finales
                 im2 = axs[2].imshow(final_w, cmap="viridis")
                 axs[2].set_title("Final Weights")
                 fig.colorbar(im2, ax=axs[2])
 
-                # Guarda la figura en un archivo
-                fig_path = (
-                    f"debug_output/tile_{pixel_tile}pixel_{offset_x}_{offset_y}.png"
-                )
+                # Guardar usando coordenadas absolutas
+                fig_path = f"debug_output/pixel_{abs_x}_{abs_y}.png"
                 plt.savefig(fig_path, dpi=300)
-                plt.close(fig)  # Cierra la figura para liberar memoria
+                plt.close(fig)
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -353,13 +350,13 @@ if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    scene = "./staircase"
+    file_path = "./inputs/cbox/"
 
     # Load the EXR file
-    bitmap = mi.Bitmap(scene + ".exr")
+    bitmap = mi.Bitmap(file_path + "imagen.exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load(scene + ".npy")  # [C, H, W, 3]
+    statistics = np.load(file_path + "stats.npy")  # [C, H, W, 3]
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]
@@ -399,13 +396,12 @@ if __name__ == "__main__":
 
     # Concatenate guidance features
     guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
-    print(guidance[0, :, 94, 55])
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(55, 94), (56, 107), (115, 91), (694, 1162)]
+    debug_pixels = [(38, 364)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, debug_pixels=debug_pixels)
@@ -427,4 +423,4 @@ if __name__ == "__main__":
     result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
     result_np = result_np[0:h, 0:w, :]
     result_bitmap = mi.Bitmap(result_np)
-    result_bitmap.write("denoised_image_v.exr")
+    result_bitmap.write(file_path + "denoised_image.exr")

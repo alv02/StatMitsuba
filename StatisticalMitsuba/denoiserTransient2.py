@@ -346,32 +346,51 @@ class StatDenoiser(nn.Module):
         return denoised_image
 
 
+def plot_stats(statistics):
+    estimands_plot = statistics[:, :, 0, :, 0]
+    estimands_variance_plot = statistics[..., 0, :, 1]
+
+    min = estimands_plot.min()
+    max = estimands_plot.max()
+    estimands_plot = (estimands_plot - min) / (max - min)
+
+    min = estimands_variance_plot.min()
+    max = estimands_variance_plot.max()
+    estimands_variance_plot = (estimands_variance_plot - min) / (max - min)
+    plt.imsave("estimand_plot.png", estimands_plot)
+    plt.imsave("estimand_variance_plot.png", estimands_variance_plot)
+
+
 if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    scene = "./aovs-transient"
+    scene = "./io/cbox/imagen"
 
     # Load the EXR file
     bitmap = mi.Bitmap(scene + ".exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./transient_stats.npy")  # [H, W, T,C, 3]
+    statistics = np.load("./io/transient/transient_stats.npy")  # [H, W, T,C, 3]
     estimands = (
         torch.from_numpy(statistics[..., 0]).to(torch.float32).permute(2, 3, 0, 1)
     )
     estimands_variance = (
         torch.from_numpy(statistics[..., 1]).to(torch.float32).permute(2, 3, 0, 1)
     )  # [1, C, H, W]
-    spp = 1024
-    print("Spp: ", spp)
+
+    plot_stats(statistics)
+
+    spp = statistics[0, 0, 0, 0, 2]
     # Extract channels from EXR
     res = dict(bitmap.split())
 
-    # Convert to PyTorch tensors
-    images = np.load("./transient_data.npy")
+    images = np.load("./io/transient/transient_data.npy")
+    image_plot = images[..., 0, :]
     images = torch.from_numpy(images).to(torch.float32).permute(2, 3, 0, 1)
 
+    image_plot = np.clip(image_plot, 0, 1)
+    plt.imsave("media_plot.png", image_plot)
     albedo = (
         torch.from_numpy(np.array(res["albedo"], dtype=np.float32))
         .permute(2, 0, 1)
@@ -399,7 +418,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = None
+    debug_pixels = [(38, 364)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)

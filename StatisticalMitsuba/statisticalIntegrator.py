@@ -54,7 +54,7 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
 
-            np.save("./bathroom_stats.npy", combined_with_spp)
+            np.save("./inputs/cbox/stats.npy", combined_with_spp)
             return combined_with_spp
 
     def should_stop(self) -> bool:
@@ -92,4 +92,4 @@ dr.set_flag(dr.JitFlag.Debug, True)
 scene = mi.load_file("../scenes/cbox_diffuse.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("./aovs-transient.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./inputs/cbox/imagen.exr", sensor.film().bitmap())

@@ -1,10 +1,11 @@
 <scene version="3.3.0">
-    <default name="spp" value="1024"/>
+    <default name="spp" value="32"/>
     <default name="res" value="400"/>
-
-  <integrator type="aov">
-      <string name="aovs" value="albedo:albedo, nn:geo_normal"/>
-      <integrator type="path" name="my_image"/>
+  <integrator type="statistical_integrator">
+    <integrator type="aov">
+        <string name="aovs" value="albedo:albedo, nn:geo_normal"/>
+        <integrator type="path" name="my_image"/>
+    </integrator>
   </integrator>
     <sensor type="perspective" id="sensor">
         <string name="fov_axis" value="smaller"/>
