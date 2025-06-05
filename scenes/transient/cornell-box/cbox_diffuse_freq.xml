@@ -1,14 +1,18 @@
 <scene version="3.3.0">
-    <default name="spp" value="32"/>
+    <default name="spp" value="16"/>
     <default name="res" value="400"/>
-  <integrator type="statistical_integrator">
-    <integrator type="aov">
-        <string name="aovs" value="albedo:albedo, nn:geo_normal"/>
-        <integrator type="path" name="my_image">
-            <integer name="max_depth" value="8"/>
-        </integrator>
+    <default name="integrator" value="transient_path"/>
+
+    <!-- Transient Integrator -->
+
+    <integrator type='$integrator'>
+      <boolean name="camera_unwarp" value="false"/>
+      <integer name="max_depth" value="8"/>
+      <string name="temporal_filter" value="box"/>
+      <float name="gaussian_stddev" value="2.0"/>
+      <boolean name="discard_direct_light" value="true"/>
     </integrator>
-  </integrator>
+    
     <sensor type="perspective" id="sensor">
         <string name="fov_axis" value="smaller"/>
         <float name="near_clip" value="10"/>
@@ -24,11 +28,17 @@
             <integer name="sample_count" value="$spp"/>
         </sampler>
         <!-- Transient Film -->
-       <film type="hdrfilm">
+        <film type="phasor_hdr_film">
             <integer name="width"  value="$res"/>
             <integer name="height" value="$res"/>
-            <string name="pixel_format" value="rgb"/>
-            <string name="component_format" value="float32"/>
+            <float name="wl_mean" value="100"/>
+            <float name="wl_sigma" value="100"/>
+            <integer name="temporal_bins" value="4000"/>
+            <float name="delta_t" value="0.003"/>
+            <float name="start_opl" value="0"/>
+            <rfilter type="box">
+              <!-- <float name="stddev" value="1.0"/> -->
+            </rfilter>
         </film>
     </sensor>
 
@@ -45,7 +55,7 @@
     <!-- Light -->
 
     <shape type="obj" id="light">
-      <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_luminaire.obj"/>
+        <string name="filename" value="meshes/cbox_luminaire.obj"/>
         <transform name="to_world">
             <translate x="0" y="-0.5" z="0"/>
         </transform>
@@ -58,41 +68,41 @@
     <!-- Shapes -->
 
     <shape type="obj" id="floor">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_floor.obj"/>
+        <string name="filename" value="meshes/cbox_floor.obj"/>
         <ref id="white"/>
     </shape>
 
     <shape type="obj" id="ceiling">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_ceiling.obj"/>
+        <string name="filename" value="meshes/cbox_ceiling.obj"/>
         <ref id="white"/>
     </shape>
 
     <shape type="obj" id="back">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_back.obj"/>
+        <string name="filename" value="meshes/cbox_back.obj"/>
         <ref id="white"/>
     </shape>
 
     <shape type="obj" id="greenwall">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_greenwall.obj"/>
+        <string name="filename" value="meshes/cbox_greenwall.obj"/>
 		<bsdf type="diffuse">
             <rgb name="reflectance" value="0.105421, 0.37798, 0.076425"/>
         </bsdf>
     </shape>
 
     <shape type="obj" id="redwall">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_redwall.obj"/>
+        <string name="filename" value="meshes/cbox_redwall.obj"/>
         <bsdf type="diffuse">
             <rgb name="reflectance" value="0.570068, 0.0430135, 0.0443706"/>
         </bsdf>
     </shape>
 
     <shape type="obj" id="smallbox">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_smallbox.obj"/>
+        <string name="filename" value="meshes/cbox_smallbox.obj"/>
         <ref id="gray"/>
     </shape>
 
     <shape type="obj" id="largebox">
-        <string name="filename" value="../external/statmitransient/examples/transient/cornell-box/meshes/cbox_largebox.obj"/>
+        <string name="filename" value="meshes/cbox_largebox.obj"/>
         <ref id="gray"/>
     </shape>
 </scene>

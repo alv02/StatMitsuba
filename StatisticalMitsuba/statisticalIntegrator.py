@@ -27,6 +27,12 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             samples_bc = self.box_cox(samples_reshaped)
             mu = dr.mean(samples_bc, axis=3)
 
+            print(
+                "Min Max mu ",
+                dr.min(mu),
+                " ",
+                dr.max(mu),
+            )
             # Use dr.newaxis to expand the dimension of mu
             mu_expanded = mu[..., dr.newaxis]
 
@@ -54,7 +60,7 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
 
-            np.save("./inputs/cbox/stats.npy", combined_with_spp)
+            np.save("./io/cbox/stats.npy", combined_with_spp)
             return combined_with_spp
 
     def should_stop(self) -> bool:
@@ -92,4 +98,4 @@ dr.set_flag(dr.JitFlag.Debug, True)
 scene = mi.load_file("../scenes/cbox_diffuse.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("./inputs/cbox/imagen.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./io/cbox/imagen.exr", sensor.film().bitmap())

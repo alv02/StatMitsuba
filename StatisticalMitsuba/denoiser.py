@@ -346,17 +346,37 @@ class StatDenoiser(nn.Module):
         return denoised_image
 
 
+def plot_stats(statistics):
+    estimands_plot = statistics[..., 0]
+    estimands_variance_plot = statistics[..., 1]
+    estimands_plot = np.transpose(estimands_plot, (1, 2, 0))
+    estimands_variance_plot = np.transpose(estimands_variance_plot, (1, 2, 0))
+
+    min = estimands_plot.min()
+    max = estimands_plot.max()
+    print("Minimo y max de estimands: ", min, " y ", max)
+    estimands_plot = (estimands_plot - min) / (max - min)
+
+    min = estimands_variance_plot.min()
+    max = estimands_variance_plot.max()
+    print("Minimo y max de estimands_variance: ", min, " y ", max)
+    estimands_variance_plot = (estimands_variance_plot - min) / (max - min)
+    plt.imsave("./debug_output/estimand_plot.png", estimands_plot)
+    plt.imsave("./debug_output/estimand_variance_plot.png", estimands_variance_plot)
+
+
 if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
-    file_path = "./inputs/cbox/"
+    file_path = "./io/cbox/"
 
     # Load the EXR file
     bitmap = mi.Bitmap(file_path + "imagen.exr")
 
     # Load pre-computed statistics (already in channels-first format)
     statistics = np.load(file_path + "stats.npy")  # [C, H, W, 3]
+    plot_stats(statistics)
     estimands = (
         torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
     )  # [1, C, H, W]

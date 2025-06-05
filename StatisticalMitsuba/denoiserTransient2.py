@@ -346,19 +346,27 @@ class StatDenoiser(nn.Module):
         return denoised_image
 
 
-def plot_stats(statistics):
+def plot_stats(statistics, mean):
     estimands_plot = statistics[:, :, 0, :, 0]
     estimands_variance_plot = statistics[..., 0, :, 1]
 
     min = estimands_plot.min()
     max = estimands_plot.max()
+    print("Minimo y max de estimands: ", min, " y ", max)
     estimands_plot = (estimands_plot - min) / (max - min)
 
     min = estimands_variance_plot.min()
     max = estimands_variance_plot.max()
+    print("Minimo y max de estimands_variance: ", min, " y ", max)
     estimands_variance_plot = (estimands_variance_plot - min) / (max - min)
-    plt.imsave("estimand_plot.png", estimands_plot)
-    plt.imsave("estimand_variance_plot.png", estimands_variance_plot)
+    min = mean.min()
+    max = mean.max()
+    print("Minimo y max de mean: ", min, " y ", max)
+    mean_plot = (mean - min) / (max - min)
+
+    plt.imsave("./debug_output/estimand_plot.png", estimands_plot)
+    plt.imsave("./debug_output/estimand_variance_plot.png", estimands_variance_plot)
+    plt.imsave("./debug_output/mean_plot.png", mean_plot)
 
 
 if __name__ == "__main__":
@@ -372,6 +380,7 @@ if __name__ == "__main__":
 
     # Load pre-computed statistics (already in channels-first format)
     statistics = np.load("./io/transient/transient_stats.npy")  # [H, W, T,C, 3]
+    mu = np.load("./io/transient/mean_2.npy")
     estimands = (
         torch.from_numpy(statistics[..., 0]).to(torch.float32).permute(2, 3, 0, 1)
     )
@@ -379,9 +388,10 @@ if __name__ == "__main__":
         torch.from_numpy(statistics[..., 1]).to(torch.float32).permute(2, 3, 0, 1)
     )  # [1, C, H, W]
 
-    plot_stats(statistics)
+    plot_stats(statistics, mu[..., 0, :])
 
     spp = statistics[0, 0, 0, 0, 2]
+    print(spp)
     # Extract channels from EXR
     res = dict(bitmap.split())
 
@@ -453,12 +463,12 @@ if __name__ == "__main__":
     print(f"Filtering time: {elapsed:.4f} seconds")
 
     final_result_np = final_result.permute(2, 3, 0, 1).cpu().numpy().astype(np.float32)
-    np.save("denoised_transient.npy", final_result_np)
+    np.save("./io/transient/denoised_transient.npy", final_result_np)
 
     result_bitmap = mi.Bitmap(final_result_np[:, :, i, ...])
     original_np = (
         images[i, ...].squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
     )
     original_bitmap = mi.Bitmap(original_np)
-    result_bitmap.write("denoised_transient_image.exr")
-    original_bitmap.write("original_transient.exr")
+    result_bitmap.write("./io/transient/denoised_transient_image.exr")
+    original_bitmap.write("./io/transient/original_transient.exr")
