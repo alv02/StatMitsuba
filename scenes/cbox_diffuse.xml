@@ -5,7 +5,7 @@
     <integrator type="aov">
         <string name="aovs" value="albedo:albedo, nn:geo_normal"/>
         <integrator type="path" name="my_image">
-            <integer name="max_depth" value="8"/>
+            <integer name="max_depth" value="1"/>
         </integrator>
     </integrator>
   </integrator>

@@ -346,7 +346,7 @@ class StatDenoiser(nn.Module):
         return denoised_image
 
 
-def plot_stats(statistics, mean):
+def plot_stats(statistics):
     estimands_plot = statistics[:, :, 0, :, 0]
     estimands_variance_plot = statistics[..., 0, :, 1]
 
@@ -359,14 +359,9 @@ def plot_stats(statistics, mean):
     max = estimands_variance_plot.max()
     print("Minimo y max de estimands_variance: ", min, " y ", max)
     estimands_variance_plot = (estimands_variance_plot - min) / (max - min)
-    min = mean.min()
-    max = mean.max()
-    print("Minimo y max de mean: ", min, " y ", max)
-    mean_plot = (mean - min) / (max - min)
 
     plt.imsave("./debug_output/estimand_plot.png", estimands_plot)
     plt.imsave("./debug_output/estimand_variance_plot.png", estimands_variance_plot)
-    plt.imsave("./debug_output/mean_plot.png", mean_plot)
 
 
 if __name__ == "__main__":
@@ -380,7 +375,6 @@ if __name__ == "__main__":
 
     # Load pre-computed statistics (already in channels-first format)
     statistics = np.load("./io/transient/transient_stats.npy")  # [H, W, T,C, 3]
-    mu = np.load("./io/transient/mean_2.npy")
     estimands = (
         torch.from_numpy(statistics[..., 0]).to(torch.float32).permute(2, 3, 0, 1)
     )
@@ -388,7 +382,7 @@ if __name__ == "__main__":
         torch.from_numpy(statistics[..., 1]).to(torch.float32).permute(2, 3, 0, 1)
     )  # [1, C, H, W]
 
-    plot_stats(statistics, mu[..., 0, :])
+    plot_stats(statistics)
 
     spp = statistics[0, 0, 0, 0, 2]
     print(spp)
