@@ -39,13 +39,24 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             # Calculate deviations from the mean (centralization)
             delta = samples_bc - mu_expanded
 
-            M3 = dr.mean(delta**3, axis=3)
+            m3 = dr.mean(delta**3, axis=3)
+
+            print(
+                "Min Max m3 ",
+                dr.min(m3),
+                " ",
+                dr.max(m3),
+            )
 
             # Calculate variance (Bessel-corrected)
             variance = np.var(samples_bc, axis=3, ddof=1)
             # When the variance is 0 there is no need for skewness correction
-            estimands = np.where(variance == 0, mu, mu + M3 / (6 * variance * spp))
+            estimands = np.where(variance == 0, mu, mu + m3 / (6 * variance * spp))
             estimands_variance = variance / spp
+            print("variance ", variance[:, 47, 361])
+            print("m3", m3[:, 47, 361])
+            print("estimands", estimands[:, 47, 361])
+            print("mu", mu[:, 47, 361])
 
             estimands_expanded = estimands[..., dr.newaxis]
             estimands_variance_expanded = estimands_variance[..., dr.newaxis]

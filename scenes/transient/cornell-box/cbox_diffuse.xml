@@ -7,7 +7,7 @@
 
     <integrator type='$integrator'>
       <boolean name="camera_unwarp" value="false"/>
-      <integer name="max_depth" value="1"/>
+      <integer name="max_depth" value="8"/>
       <string name="temporal_filter" value="box"/>
       <float name="gaussian_stddev" value="2.0"/>
     </integrator>
@@ -32,7 +32,7 @@
             <integer name="height" value="$res"/>
             <integer name="temporal_bins" value="1"/>
             <float name="start_opl" value="1000"/>
-            <float name="bin_width_opl" value="1000000000000"/>
+            <float name="bin_width_opl" value="400"/>
             <rfilter type="box">
               <!-- <float name="stddev" value="1.0"/> -->
             </rfilter>
