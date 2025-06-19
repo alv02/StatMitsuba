@@ -422,7 +422,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(140, 233)]
+    debug_pixels = [(88, 132)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
@@ -432,7 +432,7 @@ if __name__ == "__main__":
     final_result = torch.zeros_like(images)
     batches, _, _, _ = images.shape
     start_time = time.time()
-    i = 0
+    i = 2
     image_per_batch = images[i, ...].unsqueeze(0)
     estimands_per_batch = estimands[i, ...].unsqueeze(0)
     estimands_variance_per_batch = estimands_variance[i, ...].unsqueeze(0)
