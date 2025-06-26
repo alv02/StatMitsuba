@@ -16,4 +16,4 @@ import os
 import mitransient as mitr
 
 scene = mi.load_file("../scenes/transient/cornell-box/cbox_diffuse.xml")
-data_steady, data_transient = mi.render(scene, spp=32)
+data_steady, data_transient = mi.render(scene)

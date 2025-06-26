@@ -309,7 +309,7 @@ class StatDenoiser(nn.Module):
             # Calcular pesos
             weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(1)
             membership = self.compute_membership(estimands_tile, var_tile, spp)
-            final_weights = weights_jbf * membership
+            final_weights = weights_jbf  # * membership
 
             # Obtener vecindario de píxeles de la imagen
             shifted_image = self.shift(img_tile)
@@ -422,7 +422,7 @@ if __name__ == "__main__":
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(88, 132)]
+    debug_pixels = [(59, 97)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
@@ -457,7 +457,7 @@ if __name__ == "__main__":
     print(f"Filtering time: {elapsed:.4f} seconds")
 
     final_result_np = final_result.permute(2, 3, 0, 1).cpu().numpy().astype(np.float32)
-    np.save("./io/transient/denoised_transient.npy", final_result_np)
+    # np.save("./io/transient/denoised_transient.npy", final_result_np)
 
     result_bitmap = mi.Bitmap(final_result_np[:, :, i, ...])
     original_np = (
