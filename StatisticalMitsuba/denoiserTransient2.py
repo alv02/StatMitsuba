@@ -309,7 +309,7 @@ class StatDenoiser(nn.Module):
             # Calcular pesos
             weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(1)
             membership = self.compute_membership(estimands_tile, var_tile, spp)
-            final_weights = weights_jbf  # * membership
+            final_weights = weights_jbf * membership
 
             # Obtener vecindario de píxeles de la imagen
             shifted_image = self.shift(img_tile)
@@ -346,24 +346,6 @@ class StatDenoiser(nn.Module):
         return denoised_image
 
 
-def plot_stats(statistics):
-    estimands_plot = statistics[:, :, 0, :, 0]
-    estimands_variance_plot = statistics[..., 0, :, 1]
-
-    min = estimands_plot.min()
-    max = estimands_plot.max()
-    print("Minimo y max de estimands: ", min, " y ", max)
-    estimands_plot = (estimands_plot - min) / (max - min)
-
-    min = estimands_variance_plot.min()
-    max = estimands_variance_plot.max()
-    print("Minimo y max de estimands_variance: ", min, " y ", max)
-    estimands_variance_plot = (estimands_variance_plot - min) / (max - min)
-
-    plt.imsave("./debug_output/estimand_plot.png", estimands_plot)
-    plt.imsave("./debug_output/estimand_variance_plot.png", estimands_variance_plot)
-
-
 if __name__ == "__main__":
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
@@ -375,14 +357,20 @@ if __name__ == "__main__":
 
     # Load pre-computed statistics (already in channels-first format)
     statistics = np.load("./io/transient/transient_stats.npy")  # [H, W, T,C, 3]
+    estimands_np = statistics[:, :, 20, :, 0]
+    estimands_variance_np = statistics[:, :, 20, :, 1]
+    estimands_np = estimands_np - estimands_np.min()
+    estimands_variance_np = estimands_variance_np - estimands_variance_np.min()
+    estimands_bitmap = mi.Bitmap(estimands_np)
+    estimands_bitmap.write("./io/transient/estimands.exr")
+    estimands_variance_bitmap = mi.Bitmap(estimands_variance_np)
+    estimands_variance_bitmap.write("./io/transient/estimands_variance.exr")
     estimands = (
         torch.from_numpy(statistics[..., 0]).to(torch.float32).permute(2, 3, 0, 1)
     )
     estimands_variance = (
         torch.from_numpy(statistics[..., 1]).to(torch.float32).permute(2, 3, 0, 1)
     )  # [1, C, H, W]
-
-    plot_stats(statistics)
 
     spp = statistics[0, 0, 0, 0, 2]
     print(spp)
@@ -425,14 +413,14 @@ if __name__ == "__main__":
     debug_pixels = [(59, 97)]
 
     # Initialize joint bilateral filter with membership
-    stat_denoiser = StatDenoiser(radius=20, alpha=0.005, debug_pixels=debug_pixels)
+    stat_denoiser = StatDenoiser(radius=20, alpha=0.05, debug_pixels=debug_pixels)
 
     # Move tensors and model to device
 
     final_result = torch.zeros_like(images)
     batches, _, _, _ = images.shape
     start_time = time.time()
-    i = 2
+    i = 20
     image_per_batch = images[i, ...].unsqueeze(0)
     estimands_per_batch = estimands[i, ...].unsqueeze(0)
     estimands_variance_per_batch = estimands_variance[i, ...].unsqueeze(0)
