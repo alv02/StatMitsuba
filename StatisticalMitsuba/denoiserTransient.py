@@ -356,7 +356,9 @@ if __name__ == "__main__":
     bitmap = mi.Bitmap(scene + ".exr")
 
     # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load("./io/transient/transient_stats.npy")  # [H, W, T,C, 3]
+    statistics = np.load(
+        "./io/transient/escena_120_bins/transient_stats_128.npy"
+    )  # [H, W, T,C, 3]
     estimands = (
         torch.from_numpy(statistics[..., 0]).to(torch.float32).permute(2, 3, 0, 1)
     )
@@ -368,7 +370,7 @@ if __name__ == "__main__":
     res = dict(bitmap.split())
 
     # Convert to PyTorch tensors
-    images = np.load("./io/transient/transient_data.npy")
+    images = np.load("./io/transient/escena_120_bins/transient_data_128.npy")
     images = torch.from_numpy(images).to(torch.float32).permute(2, 3, 0, 1)
 
     albedo = (

@@ -1,5 +1,5 @@
 <scene version="3.3.0">
-    <default name="spp" value="64"/>
+    <default name="spp" value="10000"/>
     <default name="res" value="400"/>
     <default name="integrator" value="transient_path"/>
 

@@ -5,7 +5,7 @@ import mitsuba as mi
 import numpy as np
 from drjit.auto.ad import Bool, Float, TensorXf
 
-mi.set_variant("llvm_ad_rgb")
+mi.set_variant("cuda_ad_rgb")
 
 
 class StatisticalIntegrator(mi.SamplingIntegrator):
