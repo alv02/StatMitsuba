@@ -19,10 +19,6 @@ spp = int(sys.argv[1])
 scene = mi.load_file("../scenes/transient/cornell-box/cbox_diffuse.xml")
 
 # Renderizar con spp especificado
-data_steady, data_transient = mi.render(scene, spp=spp)
-
-# Guardar con spp en el nombre del archivo
-output_path = f"./io/transient/transient_spp{spp}.npy"
-np.save(output_path, data_transient)
-
-print(f"Guardado resultado en {output_path}")
+data_steady, data_transient, stats = mi.render(scene, spp=spp)
+np.save(f"./io/transient/transient_data_{spp}.npy", data_transient)
+np.save(f"./io/transient/transient_stats_{spp}.npy", stats)

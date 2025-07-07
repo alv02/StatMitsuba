@@ -1,0 +1,7 @@
+Denoiser:
+
+# C, H, W, T
+guidance, estimands, estimands_variance, images, spp = cargarDatos()
+
+
+denoise(guidance, estimands, estimands_variance, images, spp)

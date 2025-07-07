@@ -23,7 +23,7 @@ class Tile(nn.Module):
     def __init__(self, radius):
         super().__init__()
         self.radius = radius
-        self.final_tile_size = 256
+        self.final_tile_size = 128
         self.tile_size = self.final_tile_size + 2 * radius
         self.stride = self.final_tile_size
 
@@ -266,12 +266,10 @@ class StatDenoiser(nn.Module):
             b, -1, self.n_patches, h, w
         )
 
-        center_estimands = estimands[
-            :, :, self.radius : -self.radius, self.radius : -self.radius
-        ].unsqueeze(2)
-        center_estimands_variance = estimands_variance[
-            :, :, self.radius : -self.radius, self.radius : -self.radius
-        ].unsqueeze(2)
+        center_estimands = shifted_estimands[:, :, center_idx : center_idx + 1, :, :]
+        center_estimands_variance = shifted_estimands_variance[
+            :, :, center_idx : center_idx + 1, :, :
+        ]
 
         w_ij = self.compute_w(
             center_estimands,
@@ -424,7 +422,7 @@ if __name__ == "__main__":
     debug_pixels = [(38, 364)]
 
     # Initialize joint bilateral filter with membership
-    stat_denoiser = StatDenoiser(radius=20, debug_pixels=debug_pixels)
+    stat_denoiser = StatDenoiser(radius=20, alpha=0.05, debug_pixels=debug_pixels)
 
     # Move tensors and model to device
     stat_denoiser = stat_denoiser.to(device)
