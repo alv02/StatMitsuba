@@ -30,9 +30,9 @@
         <film type="transient_hdr_film">
             <integer name="width"  value="$res"/>
             <integer name="height" value="$res"/>
-            <integer name="temporal_bins" value="3"/>
+            <integer name="temporal_bins" value="120"/>
             <float name="start_opl" value="1000"/>
-            <float name="bin_width_opl" value="400"/>
+            <float name="bin_width_opl" value="12"/>
             <rfilter type="box">
               <!-- <float name="stddev" value="1.0"/> -->
             </rfilter>

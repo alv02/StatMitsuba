@@ -231,7 +231,7 @@ class StatDenoiser(nn.Module):
 
         # Sigma_inv(1, C*n_patches, 1, 1)
         sigma_inv = torch.tensor(
-            [0.1, 0.1, 0.2, 50, 50, 50, 10, 10, 10], dtype=torch.float32
+            [0.1, 0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
         )
         sigma_inv = torch.reshape(sigma_inv, (-1, 1, 1))
 
@@ -558,8 +558,8 @@ def load_denoiser_data(
 if __name__ == "__main__":
     # Configuración de rutas
     scene_path = "./io/cbox/imagen"
-    stats_path = "./io/transient/escena_120_bins/transient_stats_128.npy"
-    transient_path = "./io/transient/escena_120_bins/transient_data_128.npy"
+    stats_path = "./io/transient/transient_stats_2048.npy"
+    transient_path = "./io/transient/transient_data_2048.npy"
 
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
@@ -567,6 +567,10 @@ if __name__ == "__main__":
     # Cargar todos los datos
     guidance, estimands, estimands_variance, images, spp = load_denoiser_data(
         scene_path, stats_path, transient_path
+    )
+    np.save("./io/transient/estimands.npy", estimands.permute(1, 2, 3, 0))
+    np.save(
+        "./io/transient/estimands_variance.npy", estimands_variance.permute(1, 2, 3, 0)
     )
 
     # Configurar dispositivo
@@ -582,7 +586,7 @@ if __name__ == "__main__":
     # Configurar denoiser
     debug_pixels = None
     stat_denoiser = StatDenoiser(
-        radius=5, alpha=0.005, spp=spp, debug_pixels=debug_pixels
+        radius=5, alpha=0.05, spp=spp, debug_pixels=debug_pixels
     )
     stat_denoiser = stat_denoiser.to(device)
 
