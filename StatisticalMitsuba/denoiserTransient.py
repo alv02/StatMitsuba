@@ -1,4 +1,6 @@
 # Joint Bilateral Filter with Membership Functions in PyTorch
+import os
+import sys
 import time
 
 import matplotlib
@@ -60,12 +62,55 @@ def extract_tiles_3d(x, kernel_size, padding=0, stride=1):
         .unfold(2, kernel_size[1], stride[1])
         .unfold(3, kernel_size[2], stride[2])
     )
-    # (C, h_dim_out, w_dim_out, t_dim_out, kernel_size[0], kernel_size[1], kernel_size[2])
-    x = x.permute(1, 2, 3, 0, 4, 5, 6).reshape(
-        -1, channels, kernel_size[0], kernel_size[1], kernel_size[2]
+    # (C, d_dim_out, h_dim_out, w_dim_out, kernel_size[0], kernel_size[1], kernel_size[2])
+    x = x.view(channels, -1, kernel_size[0], kernel_size[1], kernel_size[2])
+    return x
+
+
+def get_dim_blocks(dim_in, kernel_size, padding=0, stride=1, dilation=1):
+    return (dim_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
+
+
+def extract_tiles_3d2(x, kernel_size, stride=1, dilation=1):
+    if isinstance(kernel_size, int):
+        kernel_size = (kernel_size, kernel_size, kernel_size)
+    if isinstance(stride, int):
+        stride = (stride, stride, stride)
+    if isinstance(dilation, int):
+        dilation = (dilation, dilation, dilation)
+    x = x.contiguous()
+
+    channels, depth, height, width = x.shape[-4:]
+    d_blocks = get_dim_blocks(
+        depth, kernel_size=kernel_size[0], stride=stride[0], dilation=dilation[0]
+    )
+    h_blocks = get_dim_blocks(
+        height, kernel_size=kernel_size[1], stride=stride[1], dilation=dilation[1]
+    )
+    w_blocks = get_dim_blocks(
+        width, kernel_size=kernel_size[2], stride=stride[2], dilation=dilation[2]
+    )
+    shape = (
+        channels,
+        d_blocks,
+        h_blocks,
+        w_blocks,
+        kernel_size[0],
+        kernel_size[1],
+        kernel_size[2],
+    )
+    strides = (
+        width * height * depth,
+        stride[0] * width * height,
+        stride[1] * width,
+        stride[2],
+        dilation[0] * width * height,
+        dilation[1] * width,
+        dilation[2],
     )
 
-    # (h_dim_out * w_dim_out * t_dim_out, C, kernel_size[0], kernel_size[1], kernel_size[2])
+    x = x.as_strided(shape, strides)
+    x = x.permute(1, 2, 3, 0, 4, 5, 6)
     return x
 
 
@@ -195,7 +240,7 @@ class Tile(nn.Module):
             value=0,
         )
 
-        tiles = extract_tiles_3d(
+        tiles = extract_tiles_3d2(
             x=x_padded, kernel_size=self.kernel_size, stride=self.stride
         )
 
@@ -270,7 +315,7 @@ class StatDenoiser(nn.Module):
 
         # Sigma_inv(1, C*n_patches, 1, 1)
         sigma_inv = torch.tensor(
-            [0.1, 0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
+            [10, 10, 10, 50, 50, 50, 10, 10, 10], dtype=torch.float32
         )
         sigma_inv = torch.reshape(sigma_inv, (-1, 1, 1))
 
@@ -412,50 +457,49 @@ class StatDenoiser(nn.Module):
         C, H, W, T = images.shape
 
         # Procesamiento por tile
-        tiles, _, _, _, _ = tiled_images.shape
+        tiles_y, tiles_x, tiles_t, _, _, _, _ = tiled_images.shape
         tiled_denoised_image = torch.empty(
             (
-                tiles,
+                tiles_y * tiles_x * tiles_t,
                 C,
                 self.tile.final_spatial_tile_size,
                 self.tile.final_spatial_tile_size,
                 self.tile.final_temporal_tile_size,
             )
         )
+        tile_index = 0
+        for y in range(tiles_y):
+            for x in range(tiles_x):
+                for t in range(tiles_t):
 
-        for i in range(tiles):
-            img_tile = tiled_images[i, :]
-            guidance_tile = tiled_guidance[i, :]
-            estimands_tile = tiled_estimands[i, :]
-            var_tile = tiled_estimands_variance[i, :]
+                    img_tile = tiled_images[y, x, t, :]
+                    guidance_tile = tiled_guidance[y, x, t, :]
+                    estimands_tile = tiled_estimands[y, x, t, :]
+                    var_tile = tiled_estimands_variance[y, x, t, :]
 
-            # Calcular pesos
-            weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(0)
-            membership = self.compute_membership(estimands_tile, var_tile)
-            final_weights = weights_jbf * membership
+                    # Calcular pesos
+                    weights_jbf = self.compute_bilateral_weights(
+                        guidance_tile
+                    ).unsqueeze(0)
+                    membership = self.compute_membership(estimands_tile, var_tile)
+                    final_weights = weights_jbf * membership
 
-            # Obtener vecindario de píxeles de la imagen
-            shifted_image = self.shift(img_tile)
+                    # Obtener vecindario de píxeles de la imagen
+                    shifted_image = self.shift(img_tile)
 
-            sum_weights = torch.sum(final_weights, dim=1)
-            final_weights = final_weights / sum_weights
-            weighted_values = shifted_image * final_weights
-            denoised_image = torch.sum(weighted_values, dim=1)
-            tiled_denoised_image[i : i + 1] = denoised_image.reshape(
-                C,
-                self.tile.final_spatial_tile_size,
-                self.tile.final_spatial_tile_size,
-                self.tile.final_temporal_tile_size,
-            )
-
-            self.debug(
-                img_tile,
-                tiled_denoised_image[i],
-                weights_jbf,
-                membership,
-                final_weights,
-                i,
-            )
+                    sum_weights = torch.sum(final_weights, dim=1)
+                    final_weights = final_weights / sum_weights
+                    weighted_values = shifted_image * final_weights
+                    denoised_image = torch.sum(weighted_values, dim=1)
+                    tiled_denoised_image[tile_index : tile_index + 1] = (
+                        denoised_image.reshape(
+                            C,
+                            self.tile.final_spatial_tile_size,
+                            self.tile.final_spatial_tile_size,
+                            self.tile.final_temporal_tile_size,
+                        )
+                    )
+                    tile_index += 1
 
         H_OUT = (
             math.ceil(H / self.tile.final_spatial_tile_size)
@@ -485,7 +529,7 @@ class StatDenoiser(nn.Module):
 
 
 def load_denoiser_data(
-    scene_path: str, stats_path: str, transient_path: str
+    aovs_path: str, stats_path: str, transient_path: str
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float]:
     """
     Carga todos los datos necesarios para el denoiser: g-buffers, estadísticas y video transiente.
@@ -509,7 +553,7 @@ def load_denoiser_data(
     _, h, w, t = images.shape
 
     # Load G-Buffers
-    bitmap = mi.Bitmap(scene_path + ".exr")
+    bitmap = mi.Bitmap(aovs_path)
     res = dict(bitmap.split())
 
     # Load albed and normals from the bitmap
@@ -568,22 +612,44 @@ def load_denoiser_data(
 
 
 if __name__ == "__main__":
-    # Configuración de rutas
-    scene_path = "./io/cbox/imagen"
-    stats_path = "./io/transient/transient_stats_2048.npy"
-    transient_path = "./io/transient/transient_data_2048.npy"
+    if len(sys.argv) != 6:
+        print(
+            "Uso: python script.py <escena> <spp> <spatial_radius> <temporal_radius> <alpha>"
+        )
+        print("Ejemplo: python script.py staircase 2048 8 3 0.05")
+        sys.exit(1)
+
+    escena = sys.argv[1]
+    spp = int(sys.argv[2])
+    spatial_radius = int(sys.argv[3])
+    temporal_radius = int(sys.argv[4])
+    alpha = float(sys.argv[5])
+
+    # Configuración de paths basada en escena y spp
+    base_io = "./io"
+    aovs_path = f"{base_io}/steady/{escena}/imagen.exr"
+    stats_path = f"{base_io}/transient/{escena}/transient_stats_{spp}.npy"
+    transient_path = f"{base_io}/transient/{escena}/transient_data_{spp}.npy"
 
     # Set Mitsuba variant
     mi.set_variant("llvm_ad_rgb")
 
     # Cargar todos los datos
     guidance, estimands, estimands_variance, images, spp = load_denoiser_data(
-        scene_path, stats_path, transient_path
+        aovs_path, stats_path, transient_path
     )
-    # np.save("./io/transient/estimands.npy", estimands.permute(1, 2, 3, 0))
-    # np.save(
-    # "./io/transient/estimands_variance.npy", estimands_variance.permute(1, 2, 3, 0)
-    # )
+    spp = int(spp)
+
+    # TODO: Esto es para debug en algun momento habrá que quitarlo
+    # Guardar estimands
+    np.save(
+        f"{base_io}/transient/{escena}/estimands_{spp}.npy",
+        estimands.permute(1, 2, 3, 0),
+    )
+    np.save(
+        f"{base_io}/transient/{escena}/estimands_variance_{spp}.npy",
+        estimands_variance.permute(1, 2, 3, 0),
+    )
 
     debug_pixels = DebugInfo((190, 85, 80))
 
@@ -600,9 +666,9 @@ if __name__ == "__main__":
     # Configurar denoiser
     debug_pixels = None
     stat_denoiser = StatDenoiser(
-        spatial_radius=8,
-        temporal_radius=3,
-        alpha=0.05,
+        spatial_radius=spatial_radius,
+        temporal_radius=temporal_radius,
+        alpha=alpha,
         spp=spp,
         debug_pixels=debug_pixels,
     )
@@ -622,11 +688,9 @@ if __name__ == "__main__":
     elapsed = time.time() - start_time
     print(f"Filtering time: {elapsed:.4f} seconds")
 
-    print(result.shape)
-    result = result.squeeze(0)
     # Guardar resultado
+    result = result.squeeze(0)
     result_np = result.permute(1, 2, 3, 0).cpu().numpy().astype(np.float32)
-    print(result_np.shape)
-
-    np.save("./io/transient/denoised_transient.npy", result_np)
-    print("Resultado guardado en ./io/transient/denoised_transient.npy")
+    output_path = f"{base_io}/transient/{escena}/denoised_transient_{spp}_{spatial_radius}_{temporal_radius}_{alpha}.npy"
+    np.save(output_path, result_np)
+    print(f"Resultado guardado en {output_path}")

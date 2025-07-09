@@ -7,14 +7,15 @@ mi.set_variant("cuda_ad_rgb")
 import mitransient as mitr
 import numpy as np
 
-# Comprobar que se han pasado los parámetros spp, escena y lambda_bc
-if len(sys.argv) != 3:
-    print("Uso: python render_transient.py <spp> <ruta_escena.xml>")
+# Comprobar que se han pasado los parámetros spp, escena, lambda_bc y output_dir
+if len(sys.argv) != 4:
+    print("Uso: python render_transient.py <spp> <ruta_escena.xml> <output_dir>")
     sys.exit(1)
 
 # Obtener los parámetros desde los argumentos
 spp = int(sys.argv[1])
 scene_path = sys.argv[2]
+output_dir = sys.argv[3]
 
 # Cargar escena
 scene = mi.load_file(scene_path)
@@ -23,7 +24,6 @@ scene = mi.load_file(scene_path)
 data_steady, data_transient, stats = mi.render(scene, spp=spp)
 
 # Crear directorio de salida si no existe
-output_dir = "./io/transient"
 os.makedirs(output_dir, exist_ok=True)
 
 # Guardar los resultados

@@ -27,12 +27,6 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             samples_bc = self.box_cox(samples_reshaped)
             mu = dr.mean(samples_bc, axis=3)
 
-            print(
-                "Min Max mu ",
-                dr.min(mu),
-                " ",
-                dr.max(mu),
-            )
             # Use dr.newaxis to expand the dimension of mu
             mu_expanded = mu[..., dr.newaxis]
 
@@ -40,24 +34,32 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
             delta = samples_bc - mu_expanded
 
             m3 = dr.mean(delta**3, axis=3)
+            # Calculate variance (Bessel-corrected)
+            mu_sq = dr.mean(samples_bc**2, axis=3)
+            variance = (mu_sq - mu**2) * spp / (spp - 1)
+
+            # When the variance is 0 there is no need for skewness correction
+            estimands = dr.select(variance == 0, mu, mu + m3 / (6 * variance * spp))
+            estimands_variance = variance / spp
 
             print(
-                "Min Max m3 ",
+                "Min Max m3: ",
                 dr.min(m3),
                 " ",
                 dr.max(m3),
             )
-
-            # Calculate variance (Bessel-corrected)
-            variance = np.var(samples_bc, axis=3, ddof=1)
-            # When the variance is 0 there is no need for skewness correction
-            estimands = np.where(variance == 0, mu, mu + m3 / (6 * variance * spp))
-            estimands_variance = variance / spp
-            print("variance ", variance[:, 47, 361])
-            print("m3", m3[:, 47, 361])
-            print("estimands", estimands[:, 47, 361])
-            print("mu", mu[:, 47, 361])
-
+            print(
+                "Min Max estmiands: ",
+                dr.min(estimands),
+                " ",
+                dr.max(estimands),
+            )
+            print(
+                "Min Max estmiands variance: ",
+                dr.min(estimands_variance),
+                " ",
+                dr.max(estimands_variance),
+            )
             estimands_expanded = estimands[..., dr.newaxis]
             estimands_variance_expanded = estimands_variance[..., dr.newaxis]
 
@@ -71,7 +73,7 @@ class StatisticalIntegrator(mi.SamplingIntegrator):
 
             combined_with_spp = np.concatenate([combined_statistics, spp_array], axis=3)
 
-            np.save("./io/cbox/stats.npy", combined_with_spp)
+            np.save("./io/steady/staircase/stats.npy", combined_with_spp)
             return combined_with_spp
 
     def should_stop(self) -> bool:
@@ -106,7 +108,7 @@ mi.register_integrator(
 )
 
 dr.set_flag(dr.JitFlag.Debug, True)
-scene = mi.load_file("../scenes/cbox_diffuse.xml")
+scene = mi.load_file("../scenes/staircase/scene.xml")
 sensor = scene.sensors()[0]
 mi.render(scene)
-mi.util.write_bitmap("./io/cbox/imagen.exr", sensor.film().bitmap())
+mi.util.write_bitmap("./io/steady/staircase/imagen.exr", sensor.film().bitmap())

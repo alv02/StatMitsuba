@@ -1,0 +1,241 @@
+📊 Evaluando con spatial=3, temporal=0, alpha=0.005
+RMSE denoised:  0.00070100575
+MSE denoised:   4.914091e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=0, alpha=0.05
+RMSE denoised:  0.0008199055
+MSE denoised:   6.7224505e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=0, alpha=0.1
+RMSE denoised:  0.00087016914
+MSE denoised:   7.5719436e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=0, alpha=0.2
+RMSE denoised:  0.0009203253
+MSE denoised:   8.469986e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=0, alpha=0.5
+RMSE denoised:  0.00094558933
+MSE denoised:   8.941392e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=1, alpha=0.005
+RMSE denoised:  0.0007984923
+MSE denoised:   6.3758995e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=1, alpha=0.05
+RMSE denoised:  0.0008465749
+MSE denoised:   7.166891e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=1, alpha=0.1
+RMSE denoised:  0.0008865027
+MSE denoised:   7.8588704e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=1, alpha=0.2
+RMSE denoised:  0.0009282858
+MSE denoised:   8.6171457e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=1, alpha=0.5
+RMSE denoised:  0.00094858964
+MSE denoised:   8.9982234e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=3, alpha=0.005
+RMSE denoised:  0.00080707157
+MSE denoised:   6.5136453e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=3, alpha=0.05
+RMSE denoised:  0.00085233763
+MSE denoised:   7.264794e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=3, alpha=0.1
+RMSE denoised:  0.00088788656
+MSE denoised:   7.883425e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=3, alpha=0.2
+RMSE denoised:  0.00092707697
+MSE denoised:   8.5947175e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=3, alpha=0.5
+RMSE denoised:  0.00095230615
+MSE denoised:   9.06887e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=5, alpha=0.005
+RMSE denoised:  0.00081676006
+MSE denoised:   6.67097e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=5, alpha=0.05
+RMSE denoised:  0.0008584689
+MSE denoised:   7.369688e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=5, alpha=0.1
+RMSE denoised:  0.00089304167
+MSE denoised:   7.9752346e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=5, alpha=0.2
+RMSE denoised:  0.00093133596
+MSE denoised:   8.6738663e-07
+-----------------------------
+📊 Evaluando con spatial=3, temporal=5, alpha=0.5
+RMSE denoised:  0.00095543114
+MSE denoised:   9.1284863e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=0, alpha=0.005
+RMSE denoised:  0.0008462063
+MSE denoised:   7.160652e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=0, alpha=0.05
+RMSE denoised:  0.0009156537
+MSE denoised:   8.3842167e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=0, alpha=0.1
+RMSE denoised:  0.0009260231
+MSE denoised:   8.575188e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=0, alpha=0.2
+RMSE denoised:  0.0009432011
+MSE denoised:   8.896284e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=0, alpha=0.5
+RMSE denoised:  0.000946337
+MSE denoised:   8.955537e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=1, alpha=0.005
+RMSE denoised:  0.0008967255
+MSE denoised:   8.041166e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=1, alpha=0.05
+RMSE denoised:  0.00092600106
+MSE denoised:   8.574779e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=1, alpha=0.1
+RMSE denoised:  0.0009324575
+MSE denoised:   8.6947705e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=1, alpha=0.2
+RMSE denoised:  0.0009457197
+MSE denoised:   8.9438583e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=1, alpha=0.5
+RMSE denoised:  0.00094865396
+MSE denoised:   8.999444e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=3, alpha=0.005
+RMSE denoised:  0.00096454105
+MSE denoised:   9.3033947e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=3, alpha=0.05
+RMSE denoised:  0.00093673245
+MSE denoised:   8.7746764e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=3, alpha=0.1
+RMSE denoised:  0.00093189237
+MSE denoised:   8.6842334e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=3, alpha=0.2
+RMSE denoised:  0.0009485306
+MSE denoised:   8.997103e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=3, alpha=0.5
+RMSE denoised:  0.00095631136
+MSE denoised:   9.1453137e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=5, alpha=0.005
+RMSE denoised:  0.0009656367
+MSE denoised:   9.324542e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=5, alpha=0.05
+RMSE denoised:  0.0009388901
+MSE denoised:   8.815146e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=5, alpha=0.1
+RMSE denoised:  0.0009342112
+MSE denoised:   8.727505e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=5, alpha=0.2
+RMSE denoised:  0.000953073
+MSE denoised:   9.0834806e-07
+-----------------------------
+📊 Evaluando con spatial=5, temporal=5, alpha=0.5
+RMSE denoised:  0.0009582999
+MSE denoised:   9.1833874e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=0, alpha=0.005
+RMSE denoised:  0.0009877783
+MSE denoised:   9.75706e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=0, alpha=0.05
+RMSE denoised:  0.000986691
+MSE denoised:   9.73559e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=0, alpha=0.1
+RMSE denoised:  0.0009671122
+MSE denoised:   9.35306e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=0, alpha=0.2
+RMSE denoised:  0.0009691499
+MSE denoised:   9.392516e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=0, alpha=0.5
+RMSE denoised:  0.00096018944
+MSE denoised:   9.2196376e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=1, alpha=0.005
+RMSE denoised:  0.0009914264
+MSE denoised:   9.829264e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=1, alpha=0.05
+RMSE denoised:  0.000982879
+MSE denoised:   9.660511e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=1, alpha=0.1
+RMSE denoised:  0.0009616243
+MSE denoised:   9.247213e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=1, alpha=0.2
+RMSE denoised:  0.00096419186
+MSE denoised:   9.29666e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=1, alpha=0.5
+RMSE denoised:  0.0009593735
+MSE denoised:   9.203975e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=3, alpha=0.005
+RMSE denoised:  0.0009908192
+MSE denoised:   9.817226e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=3, alpha=0.05
+RMSE denoised:  0.0009675264
+MSE denoised:   9.361073e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=3, alpha=0.1
+RMSE denoised:  0.0009550422
+MSE denoised:   9.121056e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=3, alpha=0.2
+RMSE denoised:  0.00095545925
+MSE denoised:   9.129024e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=3, alpha=0.5
+RMSE denoised:  0.00097379263
+MSE denoised:   9.482721e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=5, alpha=0.005
+RMSE denoised:  0.0010135261
+MSE denoised:   1.0272352e-06
+-----------------------------
+📊 Evaluando con spatial=10, temporal=5, alpha=0.05
+RMSE denoised:  0.00097252405
+MSE denoised:   9.45803e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=5, alpha=0.1
+RMSE denoised:  0.0009654548
+MSE denoised:   9.321029e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=5, alpha=0.2
+RMSE denoised:  0.00096992694
+MSE denoised:   9.4075824e-07
+-----------------------------
+📊 Evaluando con spatial=10, temporal=5, alpha=0.5
+RMSE denoised:  0.0009807975
+MSE denoised:   9.619636e-07
+-----------------------------
+✅ Evaluación completada.
