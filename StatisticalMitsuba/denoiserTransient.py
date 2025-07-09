@@ -432,7 +432,7 @@ class StatDenoiser(nn.Module):
             # Calcular pesos
             weights_jbf = self.compute_bilateral_weights(guidance_tile).unsqueeze(0)
             membership = self.compute_membership(estimands_tile, var_tile)
-            final_weights = weights_jbf  # * membership
+            final_weights = weights_jbf * membership
 
             # Obtener vecindario de píxeles de la imagen
             shifted_image = self.shift(img_tile)
