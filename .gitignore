@@ -180,7 +180,7 @@ cython_debug/
 *.png
 *.jpeg
 *.jpg
-
+*.mp4
 *.npy
 ./StatisticalMitsuba/warnings.txt
 
@@ -188,3 +188,4 @@ cython_debug/
 .tfg
 .venv
 .vscode
+

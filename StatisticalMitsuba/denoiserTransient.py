@@ -45,33 +45,11 @@ def extract_patches_3d(x, kernel_size, padding=0, stride=1):
     return x
 
 
-def extract_tiles_3d(x, kernel_size, padding=0, stride=1):
-    if isinstance(kernel_size, int):
-        kernel_size = (kernel_size, kernel_size, kernel_size)
-    if isinstance(padding, int):
-        padding = (padding, padding, padding, padding, padding, padding)
-    if isinstance(stride, int):
-        stride = (stride, stride, stride)
-
-    channels = x.shape[0]
-
-    x = torch.nn.functional.pad(x, padding)
-    # (C, H, W, T)
-    x = (
-        x.unfold(1, kernel_size[0], stride[0])
-        .unfold(2, kernel_size[1], stride[1])
-        .unfold(3, kernel_size[2], stride[2])
-    )
-    # (C, d_dim_out, h_dim_out, w_dim_out, kernel_size[0], kernel_size[1], kernel_size[2])
-    x = x.view(channels, -1, kernel_size[0], kernel_size[1], kernel_size[2])
-    return x
-
-
 def get_dim_blocks(dim_in, kernel_size, padding=0, stride=1, dilation=1):
     return (dim_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
 
 
-def extract_tiles_3d2(x, kernel_size, stride=1, dilation=1):
+def extract_tiles_3d(x, kernel_size, stride=1, dilation=1):
     if isinstance(kernel_size, int):
         kernel_size = (kernel_size, kernel_size, kernel_size)
     if isinstance(stride, int):
@@ -221,7 +199,7 @@ class Tile(nn.Module):
             self.temporal_tile_size,
         )
 
-    def forward(self, x):
+    def forward(self, x, padding_value=0):
         """
         Returns tensor (tiles, C, H, W, T)
         """
@@ -237,10 +215,10 @@ class Tile(nn.Module):
                 self.final_spatial_tile_size - 1 + self.spatial_radius,  # H right
             ),
             mode="constant",
-            value=0,
+            value=padding_value,
         )
 
-        tiles = extract_tiles_3d2(
+        tiles = extract_tiles_3d(
             x=x_padded, kernel_size=self.kernel_size, stride=self.stride
         )
 
@@ -315,7 +293,7 @@ class StatDenoiser(nn.Module):
 
         # Sigma_inv(1, C*n_patches, 1, 1)
         sigma_inv = torch.tensor(
-            [10, 10, 10, 50, 50, 50, 10, 10, 10], dtype=torch.float32
+            [0.1, 0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
         )
         sigma_inv = torch.reshape(sigma_inv, (-1, 1, 1))
 
@@ -384,18 +362,16 @@ class StatDenoiser(nn.Module):
             numerator / denominator,
         )
 
-        variance_zero = (estimand_i_variance == 0) | (estimand_j_variance == 0)
+        variance_zero = (estimand_i_variance == 0.0) | (estimand_j_variance == 0.0)
         values_differ = estimand_i != estimand_j
-        result = torch.where(
-            variance_zero & values_differ, torch.full_like(numerator, 1), result
-        )
+        result = torch.where(variance_zero, torch.full_like(numerator, 1.0), result)
 
         return result
 
     def compute_t_statistic(self, w_ij):
         """Calculate t-statistic for comparing pixels."""
         return torch.where(
-            w_ij == 1,
+            w_ij == 1.0,
             float("inf"),  # Si w_ij es 1, devuelve infinito
             torch.sqrt((1 / (2 * (1 - w_ij))) - 1),
         )
@@ -452,7 +428,7 @@ class StatDenoiser(nn.Module):
         # Tile inputs
         tiled_images = self.tile(images)
         tiled_guidance = self.tile(guidance)
-        tiled_estimands = self.tile(estimands)
+        tiled_estimands = self.tile(estimands, -2)
         tiled_estimands_variance = self.tile(estimands_variance)
         C, H, W, T = images.shape
 
@@ -530,7 +506,7 @@ class StatDenoiser(nn.Module):
 
 def load_denoiser_data(
     aovs_path: str, stats_path: str, transient_path: str
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, float]:
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
     """
     Carga todos los datos necesarios para el denoiser: g-buffers, estadísticas y video transiente.
 
@@ -607,16 +583,16 @@ def load_denoiser_data(
         .permute(3, 0, 1, 2)
         .contiguous()  # [C, H, W, T]
     )
-    spp = statistics[0, 0, 0, 0, 2]
+    spp = int(statistics[0, 0, 0, 0, 2])
     return guidance, estimands, estimands_variance, images, spp
 
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:
         print(
-            "Uso: python script.py <escena> <spp> <spatial_radius> <temporal_radius> <alpha>"
+            "Uso: python denoiserTransient.py <escena> <spp> <spatial_radius> <temporal_radius> <alpha>"
         )
-        print("Ejemplo: python script.py staircase 2048 8 3 0.05")
+        print("Ejemplo: python denoiserTransient.py staircase 2048 8 3 0.05")
         sys.exit(1)
 
     escena = sys.argv[1]
@@ -638,7 +614,6 @@ if __name__ == "__main__":
     guidance, estimands, estimands_variance, images, spp = load_denoiser_data(
         aovs_path, stats_path, transient_path
     )
-    spp = int(spp)
 
     # TODO: Esto es para debug en algun momento habrá que quitarlo
     # Guardar estimands

@@ -4,7 +4,7 @@
 	<default name="spp" value="256" />
 	<default name="resy" value="1280" />
 	<default name="resx" value="720" />
-	<default name="max_depth" value="15" />
+	<default name="max_depth" value="65" />
   <integrator type="statistical_integrator">
     <integrator type="aov">
         <string name="aovs" value="albedo:albedo, nn:geo_normal"/>

@@ -1,10 +1,13 @@
 # Joint Bilateral Filter with Membership Functions in PyTorch
+import os
+import sys
 import time
 
 import matplotlib
 
 matplotlib.use("Agg")
 import math
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import mitsuba as mi
@@ -341,6 +344,8 @@ class StatDenoiser(nn.Module):
             stride=self.tile.final_tile_size,
         )
 
+        denoised_image = denoised_image[:, :, 0:H, 0:W]
+
         return denoised_image
 
 
@@ -363,63 +368,99 @@ def plot_stats(statistics):
     plt.imsave("./debug_output/estimand_variance_plot.png", estimands_variance_plot)
 
 
-if __name__ == "__main__":
-    # Set Mitsuba variant
-    mi.set_variant("llvm_ad_rgb")
+def load_denoiser_data(
+    aovs_path: str,
+    stats_path: str,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    """
+    Carga todos los datos necesarios para el denoiser: g-buffers, estadísticas e imagen steady.
 
-    file_path = "./io/cbox/"
+    Args:
+        aovs_path: Ruta al archivo .exr con los g-buffers y la imagen
+        stats_path: Ruta al archivo .npy con las estadísticas
 
-    # Load the EXR file
-    bitmap = mi.Bitmap(file_path + "imagen.exr")
-
-    # Load pre-computed statistics (already in channels-first format)
-    statistics = np.load(file_path + "stats.npy")  # [C, H, W, 3]
-    plot_stats(statistics)
-    estimands = (
-        torch.from_numpy(statistics[:, :, :, 0]).to(torch.float32).unsqueeze(0)
-    )  # [1, C, H, W]
-    estimands_variance = (
-        torch.from_numpy(statistics[:, :, :, 1]).to(torch.float32).unsqueeze(0)
-    )  # [1, C, H, W]
-    spp = statistics[0, 0, 0, 2]
-
-    # Extract channels from EXR
+    Returns:
+        Tuple con: guidance, estimands, estimands_variance, image, spp
+        Todos los tensores en formato [1, C, H, W]
+        - guidance: 8 canales (pos_x, pos_y, albedo_r, albedo_g, albedo_b, normal_x, normal_y, normal_z)
+    """
+    # Cargar imagen .exr
+    bitmap = mi.Bitmap(aovs_path)
     res = dict(bitmap.split())
 
-    # Convert to PyTorch tensors
+    # Extraer canales de interés
     image = (
         torch.from_numpy(np.array(res["<root>"], dtype=np.float32))
         .permute(2, 0, 1)
         .unsqueeze(0)
-    )
+        .contiguous()
+    )  # [1, 3, H, W]
     albedo = (
         torch.from_numpy(np.array(res["albedo"], dtype=np.float32))
         .permute(2, 0, 1)
         .unsqueeze(0)
-    )
+        .contiguous()
+    )  # [1, 3, H, W]
     normals = (
         torch.from_numpy(np.array(res["nn"], dtype=np.float32))
         .permute(2, 0, 1)
         .unsqueeze(0)
-    )
+        .contiguous()
+    )  # [1, 3, H, W]
 
-    # Generate position features
-    h, w = albedo.shape[2], albedo.shape[3]
-
+    # Generar coordenadas normalizadas
+    _, _, h, w = albedo.shape
     y_coords = torch.linspace(-1, 1, h, dtype=torch.float32)
     x_coords = torch.linspace(-w / h, w / h, w, dtype=torch.float32)
     y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+    pos = torch.stack([x_grid, y_grid], dim=0).unsqueeze(0).contiguous()  # [1, 2, H, W]
 
-    pos = torch.stack([x_grid, y_grid], dim=0).unsqueeze(0)
+    # Concatenar guidance: [1, 8, H, W]
+    guidance = torch.cat([pos, albedo, normals], dim=1)
 
-    # Concatenate guidance features
-    guidance = torch.cat([pos, albedo, normals], dim=1)  # [1, 8, H, W]
+    # Cargar estadísticas: [C, H, W, 3]
+    statistics = np.load(stats_path)
+    print(statistics.shape)
+    estimands = (
+        torch.from_numpy(statistics[..., 0]).to(torch.float32).unsqueeze(0)
+    )  # [1, C, H, W]
+    estimands_variance = (
+        torch.from_numpy(statistics[..., 1]).to(torch.float32).unsqueeze(0)
+    )  # [1, C, H, W]
+    spp = int(statistics[0, 0, 0, 2])
+
+    return guidance, estimands, estimands_variance, image, spp
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 5:
+        print("Uso: python denoiser.py <escena> <spp> <spatial_radius> <alpha>")
+        print("Ejemplo: python denoiser.py staircase 2048 20 0.05")
+        sys.exit(1)
+
+    escena = sys.argv[1]
+    spp = int(sys.argv[2])
+    spatial_radius = int(sys.argv[3])
+    alpha = float(sys.argv[4])
+
+    # Configuración de paths basada en escena y spp
+    base_io = "./io"
+    aovs_path = f"{base_io}/steady/{escena}/imagen.exr"
+    stats_path = f"{base_io}/steady/{escena}/stats_{spp}.npy"
+
+    # Set Mitsuba variant
+    mi.set_variant("llvm_ad_rgb")
+
+    # Cargar todos los datos
+    guidance, estimands, estimands_variance, image, spp = load_denoiser_data(
+        aovs_path, stats_path
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
     # Define debug pixels - modify these to the coordinates you want to examine
-    debug_pixels = [(38, 364)]
+    debug_pixels = None  # [(38, 364)]
 
     # Initialize joint bilateral filter with membership
     stat_denoiser = StatDenoiser(radius=20, alpha=0.05, debug_pixels=debug_pixels)
@@ -439,6 +480,9 @@ if __name__ == "__main__":
     print(f"Filtering time: {elapsed:.4f} seconds")
 
     result_np = result.squeeze(0).permute(1, 2, 0).cpu().numpy().astype(np.float32)
-    result_np = result_np[0:h, 0:w, :]
     result_bitmap = mi.Bitmap(result_np)
-    result_bitmap.write(file_path + "denoised_image.exr")
+    output_path = (
+        f"{base_io}/steady/{escena}/denoised_{spp}_{spatial_radius}_{alpha}.exr"
+    )
+    result_bitmap.write(output_path)
+    print(f"Resultado guardado en {output_path}")
