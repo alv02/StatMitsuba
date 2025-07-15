@@ -10,6 +10,7 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import drjit as dr
 import matplotlib.pyplot as plt
 import mitsuba as mi
 import numpy as np
@@ -255,16 +256,6 @@ class Shift(nn.Module):
         return patches
 
 
-@dataclass
-class DebugInfo:
-    position: Tuple[int, int, int]  # (x, y, t)
-    kernel_range_x: Optional[Tuple[int, int]] = (
-        None  # por ejemplo (-1, 2) para x-1 hasta x+2
-    )
-    kernel_range_y: Optional[Tuple[int, int]] = None
-    kernel_range_t: Optional[Tuple[int, int]] = None
-
-
 class StatDenoiser(nn.Module):
     """
     Joint Bilateral Filter with Membership Functions uses guidance image to calculate weights
@@ -277,7 +268,7 @@ class StatDenoiser(nn.Module):
         temporal_radius=5,
         alpha=0.005,
         spp=0,
-        debug_pixels: Optional[DebugInfo] = None,
+        debug_pixels=None,
     ):
         super(StatDenoiser, self).__init__()
 
@@ -288,13 +279,12 @@ class StatDenoiser(nn.Module):
         self.alpha = alpha
         self.n_patches = self.spatial_kernel_size**2 * self.temporal_kernel_size
         self.gamma_w = self.compute_gamma_w(spp, spp, alpha)
+        print(self.gamma_w)
 
         # Debug parameters
 
         # Sigma_inv(1, C*n_patches, 1, 1)
-        sigma_inv = torch.tensor(
-            [0.1, 0.1, 0.1, 50, 50, 50, 10, 10, 10], dtype=torch.float32
-        )
+        sigma_inv = torch.tensor([1, 1, 1, 50, 50, 50, 10, 10, 10], dtype=torch.float32)
         sigma_inv = torch.reshape(sigma_inv, (-1, 1, 1))
 
         self.register_buffer("sigma_inv", sigma_inv)
@@ -305,21 +295,95 @@ class StatDenoiser(nn.Module):
         self.tile = Tile(spatial_radius=spatial_radius, temporal_radius=temporal_radius)
         self.debug_pixels = debug_pixels
 
+    def get_debug_pixels_tiled(self, debug_pixels, H, W, T):
+        tiled_debug_pixels = []
+
+        tiles_y = math.ceil(H / self.tile.final_spatial_tile_size)
+        tiles_x = math.ceil(W / self.tile.final_spatial_tile_size)
+        tiles_t = math.ceil(T / self.tile.final_temporal_tile_size)
+
+        for pixel_x, pixel_y, pixel_t in debug_pixels:
+            # Fix: divide by tile size, not number of tiles
+            tile_y = pixel_y // self.tile.final_spatial_tile_size
+            tile_x = pixel_x // self.tile.final_spatial_tile_size
+            tile_t = pixel_t // self.tile.final_temporal_tile_size
+
+            # Calculate linear tile index
+            index = dr.fma(tile_y, tiles_x, tile_x)
+            index = dr.fma(index, tiles_t, tile_t)
+
+            # Calculate offset within the tile
+            offset_y = pixel_y % self.tile.final_spatial_tile_size
+            offset_x = pixel_x % self.tile.final_spatial_tile_size
+            offset_t = pixel_t % self.tile.final_temporal_tile_size
+
+            tiled_debug_pixels.append(
+                (index, offset_x, offset_y, offset_t, pixel_x, pixel_y, pixel_t)
+            )
+
+        return tiled_debug_pixels
+
     def debug(
         self,
-        original_tile,
-        denoised_tile,
+        shifted_tile,
+        shifted_estimands,
+        shifted_estimands_variance,
         weights_jbf,
         membership,
         final_weights,
-        tile_index,
+        current_tile_index,
+        H,
+        W,
+        T,
     ):
-        if tile_index == 0:
-            np.save(
-                "./debug_output/original_tile.npy",
-                original_tile.permute(1, 2, 3, 0).cpu().numpy(),
-            )
-        pass
+        if debug_pixels is None:
+            return
+
+        debug_pixels_tiled = self.get_debug_pixels_tiled(self.debug_pixels, H, W, T)
+
+        for (
+            tile_index,
+            offset_x,
+            offset_y,
+            offset_t,
+            pixel_x,
+            pixel_y,
+            pixel_t,
+        ) in debug_pixels_tiled:
+            if tile_index != current_tile_index:
+                continue
+
+            def extract_patch(tensor, name):
+                C, _, _ = tensor.shape
+                tensor = tensor.reshape(
+                    C,  # canales
+                    -1,
+                    self.tile.final_spatial_tile_size,
+                    self.tile.final_spatial_tile_size,
+                    self.tile.final_temporal_tile_size,
+                )
+                tensor = (
+                    tensor[:, :, offset_y, offset_x, offset_t]
+                    .reshape(
+                        -1,
+                        self.spatial_kernel_size,
+                        self.spatial_kernel_size,
+                        self.temporal_kernel_size,
+                    )
+                    .permute(1, 2, 3, 0)
+                )
+
+                np.save(
+                    f"./debug_output/transient/{name}_{pixel_x}_{pixel_y}_{pixel_t}.npy",
+                    tensor.cpu().numpy(),
+                )
+
+            extract_patch(shifted_tile, "patches")
+            extract_patch(shifted_estimands, "estimands")
+            extract_patch(shifted_estimands_variance, "estimands_variance")
+            extract_patch(weights_jbf, "weights_jbf")
+            extract_patch(membership, "membership")
+            extract_patch(final_weights, "final_weights")
 
     def compute_gamma_w(self, n_i, n_j, alpha=0.005):
         """Calculate critical value using t-distribution."""
@@ -357,22 +421,26 @@ class StatDenoiser(nn.Module):
         # Handle special case where both numerator and denominator are 0
 
         result = torch.where(
-            (numerator == 0) & (denominator == 0),
+            (numerator == 0) & (denominator == 0.0),
             torch.full_like(numerator, 0.5),
             numerator / denominator,
         )
 
         variance_zero = (estimand_i_variance == 0.0) | (estimand_j_variance == 0.0)
+        # variance_zero = (estimand_i_variance + estimand_j_variance) == 0.0
         values_differ = estimand_i != estimand_j
-        result = torch.where(variance_zero, torch.full_like(numerator, 1.0), result)
+        result = torch.where(
+            variance_zero & values_differ, torch.full_like(numerator, 1.0), result
+        )
 
         return result
 
     def compute_t_statistic(self, w_ij):
         """Calculate t-statistic for comparing pixels."""
+        inf_tensor = torch.full_like(w_ij, float("inf"))
         return torch.where(
             w_ij == 1.0,
-            float("inf"),  # Si w_ij es 1, devuelve infinito
+            inf_tensor,  # Si w_ij es 1, devuelve infinito
             torch.sqrt((1 / (2 * (1 - w_ij))) - 1),
         )
 
@@ -474,6 +542,18 @@ class StatDenoiser(nn.Module):
                             self.tile.final_spatial_tile_size,
                             self.tile.final_temporal_tile_size,
                         )
+                    )
+                    self.debug(
+                        shifted_image,
+                        self.shift(estimands_tile),
+                        self.shift(var_tile),
+                        weights_jbf,
+                        membership,
+                        final_weights,
+                        tile_index,
+                        H,
+                        W,
+                        T,
                     )
                     tile_index += 1
 
@@ -626,8 +706,6 @@ if __name__ == "__main__":
         estimands_variance.permute(1, 2, 3, 0),
     )
 
-    debug_pixels = DebugInfo((190, 85, 80))
-
     # Configurar dispositivo
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -639,7 +717,7 @@ if __name__ == "__main__":
     images = images.to(device)
 
     # Configurar denoiser
-    debug_pixels = None
+    debug_pixels = [(238, 588, 0)]
     stat_denoiser = StatDenoiser(
         spatial_radius=spatial_radius,
         temporal_radius=temporal_radius,

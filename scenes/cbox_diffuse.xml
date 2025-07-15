@@ -1,5 +1,5 @@
 <scene version="3.3.0">
-    <default name="spp" value="32"/>
+    <default name="spp" value="2048"/>
     <default name="res" value="400"/>
   <integrator type="statistical_integrator">
     <integrator type="aov">
