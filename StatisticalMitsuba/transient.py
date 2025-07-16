@@ -28,4 +28,5 @@ os.makedirs(output_dir, exist_ok=True)
 
 # Guardar los resultados
 np.save(f"{output_dir}/transient_data_{spp}.npy", data_transient)
-np.save(f"{output_dir}/transient_stats_{spp}.npy", stats)
+np.save(f"{output_dir}/estimands_{spp}.npy", stats[0])
+np.save(f"{output_dir}/estimands_variance_{spp}.npy", stats[1])

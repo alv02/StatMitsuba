@@ -25,7 +25,8 @@
       <integer name="temporal_bins" value="60"/>
       <float name="start_opl" value="7.5"/>
       <float name="bin_width_opl" value="0.25"/>
-      <float name="lambda" value="0.5"/>
+      <float name="lambda" value="1"/>
+      <integer name="transformation" value="0"/>
       <rfilter type="box">
       <!--  <float name="stddev" value="1.0"/>  -->
       </rfilter>

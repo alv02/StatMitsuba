@@ -19,6 +19,8 @@ import torch.nn.functional as F
 from scipy import stats
 from torch import nn
 
+EPSILON = 1e-12
+
 
 def extract_patches_3d(x, kernel_size, padding=0, stride=1):
     if isinstance(kernel_size, int):
@@ -421,16 +423,21 @@ class StatDenoiser(nn.Module):
         # Handle special case where both numerator and denominator are 0
 
         result = torch.where(
-            (numerator == 0) & (denominator == 0.0),
+            (numerator == 0.0) & (denominator == 0.0),
             torch.full_like(numerator, 0.5),
             numerator / denominator,
         )
 
-        variance_zero = (estimand_i_variance == 0.0) | (estimand_j_variance == 0.0)
-        # variance_zero = (estimand_i_variance + estimand_j_variance) == 0.0
+        # variance_zero = (estimand_i_variance == 0.0) | (estimand_j_variance == 0.0)
+        variance_zero = (estimand_i_variance + estimand_j_variance) < EPSILON
+        variance_zero_all_channels = (estimand_i_variance < EPSILON).all(
+            dim=0, keepdim=True
+        ) | (estimand_j_variance < EPSILON).all(dim=0, keepdim=True)
         values_differ = estimand_i != estimand_j
         result = torch.where(
-            variance_zero & values_differ, torch.full_like(numerator, 1.0), result
+            (variance_zero & values_differ) | variance_zero_all_channels,
+            torch.full_like(numerator, 1.0),
+            result,
         )
 
         return result
@@ -585,34 +592,34 @@ class StatDenoiser(nn.Module):
 
 
 def load_denoiser_data(
-    aovs_path: str, stats_path: str, transient_path: str
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, int]:
+    aovs_path: str,
+    estimands_path: str,
+    estimands_variance_path: str,
+    transient_path: str,
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Carga todos los datos necesarios para el denoiser: g-buffers, estadísticas y video transiente.
 
     Args:
-        scene_path: Ruta al archivo .exr con los g-buffers
-        stats_path: Ruta al archivo .npy con las estadísticas
+        aovs_path: Ruta al archivo .exr con los g-buffers
+        estimands_path: Ruta al archivo .npy con los estimadores
+        estimands_variance_path: Ruta al archivo .npy con la varianza de los estimadores
         transient_path: Ruta al archivo .npy con el video transiente
 
     Returns:
-        Tuple con: guidance, estimands, estimands_variance, images, spp, shape
+        Tuple con: guidance, estimands, estimands_variance, images
         Todos los tensores en formato [C, H, W, T]
-        - guidance: 9 canales (pos_x, pos_y, albedo_r, albedo_g, albedo_b, normal_x, normal_y, normal_z, temporal)
     """
-    # Load transient video
+    # Cargar video transiente
     images = np.load(transient_path)
-    images = (
-        torch.from_numpy(images).to(torch.float32).permute(3, 0, 1, 2).contiguous()
-    )  # [C, H, W, T]
+    images = torch.from_numpy(images).to(torch.float32).permute(3, 0, 1, 2).contiguous()
 
     _, h, w, t = images.shape
 
-    # Load G-Buffers
+    # Cargar G-Buffers
     bitmap = mi.Bitmap(aovs_path)
     res = dict(bitmap.split())
 
-    # Load albed and normals from the bitmap
     albedo = (
         torch.from_numpy(np.array(res["albedo"], dtype=np.float32))
         .permute(2, 0, 1)
@@ -626,84 +633,65 @@ def load_denoiser_data(
         .contiguous()
     )
 
-    # TODO: Mejorar esto usando torch funcions en vez de for
-    # Generar features de posición
+    # Posiciones
     y_coords = torch.linspace(-1, 1, h, dtype=torch.float32)
     x_coords = torch.linspace(-w / h, w / h, w, dtype=torch.float32)
     z_coords = torch.linspace(-1, 1, t, dtype=torch.float32)
     y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
 
-    # Crear pos con dimensión temporal [3, H, W, T]
     pos_list = []
     for i in range(t):
         z_val = z_coords[i]
         z_grid = torch.full_like(x_grid, z_val)
-        pos_frame = torch.stack([x_grid, y_grid, z_grid], dim=0)  # [3, H, W]
+        pos_frame = torch.stack([x_grid, y_grid, z_grid], dim=0)
         pos_list.append(pos_frame)
-    pos = torch.stack(pos_list, dim=-1)  # [3, H, W, T]
+    pos = torch.stack(pos_list, dim=-1)
 
-    # Expandir albedo y normals para la dimensión temporal
-    albedo = albedo.squeeze(0).unsqueeze(-1).expand(-1, -1, -1, t)  # [3, H, W, T]
-    normals = normals.squeeze(0).unsqueeze(-1).expand(-1, -1, -1, t)  # [3, H, W, T]
+    albedo = albedo.squeeze(0).unsqueeze(-1).expand(-1, -1, -1, t)
+    normals = normals.squeeze(0).unsqueeze(-1).expand(-1, -1, -1, t)
 
-    # Concatenar guidance features
-    guidance = torch.cat(
-        [pos, albedo, normals], dim=0
-    )  # [9, H, W, T]    # Load statistics
-    statistics = np.load(stats_path)  # [H, W, T, C, 3]
+    guidance = torch.cat([pos, albedo, normals], dim=0)
+
+    # Cargar estadísticas
     estimands = (
-        torch.from_numpy(statistics[..., 0])
+        torch.from_numpy(np.load(estimands_path))
         .to(torch.float32)
         .permute(3, 0, 1, 2)
-        .contiguous()  # [C, H, W, T]
+        .contiguous()
     )
     estimands_variance = (
-        torch.from_numpy(statistics[..., 1])
+        torch.from_numpy(np.load(estimands_variance_path))
         .to(torch.float32)
         .permute(3, 0, 1, 2)
-        .contiguous()  # [C, H, W, T]
+        .contiguous()
     )
-    spp = int(statistics[0, 0, 0, 0, 2])
-    return guidance, estimands, estimands_variance, images, spp
+
+    return guidance, estimands, estimands_variance, images
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 10:
         print(
-            "Uso: python denoiserTransient.py <escena> <spp> <spatial_radius> <temporal_radius> <alpha>"
+            "Uso: python denoiserTransient.py <transient.npy> <aovs.exr> <estimands.npy> <variance.npy> <spp> <spatial_radius> <temporal_radius> <alpha> <output_path>"
         )
-        print("Ejemplo: python denoiserTransient.py staircase 2048 8 3 0.05")
+        print(
+            "Ejemplo: python denoiserTransient.py kitchen/transient.npy kitchen/aovs.exr stats/estimands.npy stats/variance.npy 2048 8 3 0.05 denoised.npy"
+        )
         sys.exit(1)
 
-    escena = sys.argv[1]
-    spp = int(sys.argv[2])
-    spatial_radius = int(sys.argv[3])
-    temporal_radius = int(sys.argv[4])
-    alpha = float(sys.argv[5])
+    transient_path = sys.argv[1]
+    aovs_path = sys.argv[2]
+    estimands_path = sys.argv[3]
+    estimands_variance_path = sys.argv[4]
+    spp = int(sys.argv[5])
+    spatial_radius = int(sys.argv[6])
+    temporal_radius = int(sys.argv[7])
+    alpha = float(sys.argv[8])
+    output_path = sys.argv[9]
 
-    # Configuración de paths basada en escena y spp
-    base_io = "./io"
-    aovs_path = f"{base_io}/steady/{escena}/imagen.exr"
-    stats_path = f"{base_io}/transient/{escena}/transient_stats_{spp}.npy"
-    transient_path = f"{base_io}/transient/{escena}/transient_data_{spp}.npy"
-
-    # Set Mitsuba variant
-    mi.set_variant("llvm_ad_rgb")
-
-    # Cargar todos los datos
-    guidance, estimands, estimands_variance, images, spp = load_denoiser_data(
-        aovs_path, stats_path, transient_path
-    )
-
-    # TODO: Esto es para debug en algun momento habrá que quitarlo
-    # Guardar estimands
-    np.save(
-        f"{base_io}/transient/{escena}/estimands_{spp}.npy",
-        estimands.permute(1, 2, 3, 0),
-    )
-    np.save(
-        f"{base_io}/transient/{escena}/estimands_variance_{spp}.npy",
-        estimands_variance.permute(1, 2, 3, 0),
+    # Ahora puedes llamar a load_denoiser_data sin suposiciones de path
+    guidance, estimands, estimands_variance, images = load_denoiser_data(
+        aovs_path, estimands_path, estimands_variance_path, transient_path
     )
 
     # Configurar dispositivo
@@ -717,12 +705,12 @@ if __name__ == "__main__":
     images = images.to(device)
 
     # Configurar denoiser
-    debug_pixels = [(238, 588, 0)]
+    debug_pixels = [(373, 74, 6)]
     stat_denoiser = StatDenoiser(
         spatial_radius=spatial_radius,
         temporal_radius=temporal_radius,
         alpha=alpha,
-        spp=spp,
+        spp=spp * 17,
         debug_pixels=debug_pixels,
     )
     stat_denoiser = stat_denoiser.to(device)
@@ -744,6 +732,5 @@ if __name__ == "__main__":
     # Guardar resultado
     result = result.squeeze(0)
     result_np = result.permute(1, 2, 3, 0).cpu().numpy().astype(np.float32)
-    output_path = f"{base_io}/transient/{escena}/denoised_transient_{spp}_{spatial_radius}_{temporal_radius}_{alpha}.npy"
     np.save(output_path, result_np)
     print(f"Resultado guardado en {output_path}")
